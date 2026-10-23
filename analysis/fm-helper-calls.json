@@ -1,0 +1,36 @@
+[
+  {
+    "name": "open_binary",
+    "arguments": {
+      "path": "C:\\Program Files\\3uTools9\\idm_fm.dll",
+      "provider_id": "ghidra"
+    },
+    "output": "fm-open-repeat"
+  },
+  {
+    "name": "analyze_function",
+    "arguments": {
+      "procedure": "0x180001fa0"
+    },
+    "output": "fm-read-helper"
+  },
+  {
+    "name": "analyze_function",
+    "arguments": {
+      "procedure": "0x180001dd0"
+    },
+    "output": "fm-open-helper"
+  },
+  {
+    "name": "search_procedures",
+    "arguments": {
+      "pattern": "FileMgr::FileMgr"
+    },
+    "output": "fm-constructor-search"
+  },
+  {
+    "name": "close_binary",
+    "arguments": {},
+    "output": "fm-close"
+  }
+]

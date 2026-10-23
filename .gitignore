@@ -1,0 +1,6 @@
+/target/
+/.tools/
+/baseline/
+/analysis/private/
+/exports/
+*.partial

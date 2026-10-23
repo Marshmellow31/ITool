@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "provenance": {
+      "untrusted_content": true,
+      "source": "analysis_target"
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"result\":{\"path\":\"C:\\\\Program Files\\\\3uTools9\\\\idm_fm.dll\",\"format\":\"pe\",\"kind\":\"executable\",\"sha256\":\"93a1dff3a1598ff3c26e857f0ba0223182a82175d5ed12adce165af5fcd5f464\",\"architecture\":\"x86_64\"}}"
+    }
+  ],
+  "structuredContent": {
+    "result": {
+      "path": "C:\\Program Files\\3uTools9\\idm_fm.dll",
+      "format": "pe",
+      "kind": "executable",
+      "sha256": "93a1dff3a1598ff3c26e857f0ba0223182a82175d5ed12adce165af5fcd5f464",
+      "architecture": "x86_64"
+    }
+  }
+}

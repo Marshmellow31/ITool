@@ -1,0 +1,59 @@
+{
+  "transport": "Apple USB service + pure Rust AFC",
+  "chunk_kib": 1024,
+  "files": [
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3117.MOV",
+      "filename": "IMG_3117.MOV",
+      "bytes": 36581821,
+      "sha256": "87d5c8c682dab36c0c16fc88ff96ee11d0c0919173d9b9e9f87aaca46110aa8b",
+      "seconds": 2.1959996999999998
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3119.MOV",
+      "filename": "IMG_3119.MOV",
+      "bytes": 1028505,
+      "sha256": "2f813a0f9a768889db16e9b6acc0e750d847fe6ff049a389e916a3c6080fd3b7",
+      "seconds": 0.0914324
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3118.MOV",
+      "filename": "IMG_3118.MOV",
+      "bytes": 47443647,
+      "sha256": "e9bb34a29d691fa22f9de2e402f3c7387fb96791734db928566fd5f930eaa2e6",
+      "seconds": 2.1985114
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3120.MOV",
+      "filename": "IMG_3120.MOV",
+      "bytes": 39392009,
+      "sha256": "b181e131f0c6a0a685edb3314cf4e9c900819f513345de0d34e1b617308c68d6",
+      "seconds": 3.0292914
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3121.MOV",
+      "filename": "IMG_3121.MOV",
+      "bytes": 28851720,
+      "sha256": "067c2c106088e91ad18fbad5a0884f2c867819c83afa4c54efcf30d19505f6be",
+      "seconds": 1.615534
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3119.HEIC",
+      "filename": "IMG_3119.HEIC",
+      "bytes": 2401184,
+      "sha256": "43d1e984e11d1301b7cba077b30229808a16e4f12e76c56955bf4ae584bfd14e",
+      "seconds": 0.1408945
+    },
+    {
+      "source_path": "/DCIM/123APPLE/IMG_3122.MOV",
+      "filename": "IMG_3122.MOV",
+      "bytes": 29553980,
+      "sha256": "4e2612fc1c4e92acd0eb0828ac78312a4664a42c226988eea177102eb40270ec",
+      "seconds": 1.8600275
+    }
+  ],
+  "total_bytes": 185252866,
+  "transfer_seconds": 11.1781255,
+  "mib_per_second": 15.805056075354372,
+  "verification": "stream SHA-256 matches destination reread; source size and mtime stable; no independent source digest"
+}

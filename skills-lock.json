@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "106acf230014cbb43ca34e6410371321b56ca742f9ee0442e8ec05bf02eb0384"
+    },
+    "slint": {
+      "source": "slint-ui/slint",
+      "sourceType": "github",
+      "skillPath": "ai-plugins/skills/slint/SKILL.md",
+      "computedHash": "24163e0098f6671993a1b6bc7fe24ba25399983fd7d3455d8e868b65d60ade4f"
+    }
+  }
+}

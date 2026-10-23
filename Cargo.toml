@@ -1,0 +1,31 @@
+[package]
+name = "itool"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only iPhone media exporter for Windows"
+license = "MIT"
+default-run = "itool"
+
+[features]
+desktop = ["dep:eframe", "dep:image", "dep:rfd"]
+
+[[bin]]
+name = "itool-desktop"
+path = "src/bin/itool-desktop.rs"
+required-features = ["desktop"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+idevice = { version = "=0.1.68", default-features = false, features = ["ring", "usbmuxd", "afc"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+eframe = { version = "=0.37.0", optional = true, default-features = false, features = ["default_fonts", "glow", "accesskit"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["jpeg"] }
+rfd = { version = "0.17", optional = true }
+
+[profile.release]
+lto = "thin"

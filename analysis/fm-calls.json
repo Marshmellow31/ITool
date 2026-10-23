@@ -1,0 +1,45 @@
+[
+  {
+    "name": "open_binary",
+    "arguments": {
+      "path": "C:\\Program Files\\3uTools9\\idm_fm.dll",
+      "provider_id": "ghidra"
+    },
+    "output": "fm-open"
+  },
+  {
+    "name": "search_strings",
+    "arguments": {
+      "pattern": "com.apple.afc"
+    },
+    "output": "fm-afc-string"
+  },
+  {
+    "name": "analyze_function",
+    "arguments": {
+      "procedure": "0x180008ac0"
+    },
+    "output": "fm-File2PC-0"
+  },
+  {
+    "name": "procedure_callees",
+    "arguments": {
+      "procedure": "0x180008ac0"
+    },
+    "output": "fm-File2PC-0-callees"
+  },
+  {
+    "name": "analyze_function",
+    "arguments": {
+      "procedure": "0x1800088a0"
+    },
+    "output": "fm-File2PC-1"
+  },
+  {
+    "name": "procedure_callees",
+    "arguments": {
+      "procedure": "0x1800088a0"
+    },
+    "output": "fm-File2PC-1-callees"
+  }
+]
