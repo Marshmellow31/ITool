@@ -62,6 +62,27 @@ Transferring photos and videos from an iPhone to a Windows PC has historically b
 
 ---
 
+## Daily editor workflow
+
+Use the **Dark mode / Light mode** button at the top right to switch the entire workspace. The preference is saved locally in `%APPDATA%\ITool\preferences.json` and reused on launch. Native Windows folder-picker appearance follows Windows settings.
+
+1. **Connect & scan:** connect one iPhone by USB, unlock it, confirm Trust, and click **Scan iPhone**. A scanned library is a snapshot; reconnect the phone before copying.
+2. **Choose media:** use filename/date/folder search, Photos / Videos / Live filters, the month sidebar, or **Latest day**. Latest day means the newest device file date in the scan, not necessarily today.
+3. **Set your view:** choose **Grid** for thumbnails or **Details** for names, dates, sizes, types, and resource counts. Adjust thumbnail size. Sort by newest, oldest, largest, smallest, name A–Z, or name Z–A. Group by month, week, day, media type, source folder, or no grouping. The sort applies inside each group; groups appear in first-encounter order. Source folders are DCIM directories, not Photos albums.
+4. **Select:** click individual items, Shift-click a range, drag across the grid, select a group, or use **Select shown**, **Invert shown**, and **Clear selection**. **Selected only** reviews your basket. Selection survives filters. Ctrl+A selects shown media; Escape clears selection when a text field or review window is not focused. Select shown and Invert shown affect the current filtered view only.
+5. **Review export:** choose an existing parent folder and click **Review … items**. Review lists every original resource, including both Live Photo components and any selections hidden by filters. Choose one folder, folders by day/month, separate media-type folders, or source folders. Duplicate output names block transfer; source-folder organization resolves matching names in different DCIM folders.
+6. **Transfer & verify:** click **Start transfer**. ITool creates the exact new folder shown in review, keeps original filenames, and copies the selected resources in group/sort order. Cancel preserves completed files. Open the resulting folder after completion, or use **Open incomplete export** after an interrupted transfer.
+
+**Dates:** browsing and date-based export folders use device filesystem creation time. They are not an EXIF capture-date guarantee. Embedded metadata remains unchanged.
+
+**Transfer evidence:** `completed.json` records successfully copied files after each file, with source paths, relative output paths, byte counts, and SHA-256 hashes. A successful batch also writes `transfer.json` with totals and verification details. Verification compares the received stream hash with a local destination reread and checks source size/mtime stability; it is not an independent source digest. These reports contain private media paths and stay in your local export folder. They do not implement automatic resume or incremental sync.
+
+The export-folder choices are informed by [3uTools' documented Professional Export options](https://www.3u.com/3u). ITool keeps original resources together and never converts or writes media to the phone.
+
+For a device-free UI preview, run `itool-desktop.exe --demo`. The sample media is synthetic, and device scanning and transfer are disabled. Add `--demo-list`, `--demo-review`, or `--demo-dark` to preview those surfaces and the dark palette. UI appearance and automated checks do not establish real-device transfer behavior.
+
+---
+
 ## Why ITool is Better than 3uTools & Proprietary Chinese Apps
 
 Popular third-party iOS management software (such as **3uTools**, **iTools**, **Tenorshare iCareFone**, etc.) has long dominated Windows iOS utilities, but they come with severe privacy, safety, and performance trade-offs.
@@ -87,7 +108,7 @@ ITool is being actively developed to become the fastest, most reliable, and most
 👉 **[Open a GitHub Issue](https://github.com/Marshmellow31/ITool/issues)** or reach out directly — **if a feature is requested, it will be prioritized and built!**
 
 ### Ideas on the Roadmap:
-- [ ] **Custom Destination Templates**: Organize exports automatically by year/month folders (e.g., `Destination/2026/10/`).
+- [x] **Organized Exports**: Choose day, month, media-type, source-folder, or flat output in export review; see the date-source limitation above.
 - [ ] **Incremental Sync**: One-click "Export New Photos Only" to skip media already backed up previously.
 - [ ] **Selective Format Conversion**: Optional toggle to export converted JPEG/MP4 copies alongside the original HEIC/MOV.
 - [ ] **Capture Timestamp Preservation**: Explicitly stamp NTFS file creation and modification timestamps from embedded EXIF metadata.
@@ -104,7 +125,7 @@ ITool is being actively developed to become the fastest, most reliable, and most
 
 ### Installation
 1. Go to the latest **[GitHub Releases](https://github.com/Marshmellow31/ITool/releases)**.
-2. Download `ITool-v0.1.0-windows-x64.zip` (or `itool-desktop.exe` directly).
+2. Download `ITool-v0.2.0-windows-x64.zip` (or `itool-desktop.exe` directly).
 3. Unzip anywhere and double-click `itool-desktop.exe` to run. No installation or admin privileges needed.
 
 ---

@@ -390,7 +390,9 @@ pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>
     let mut items = Vec::new();
     let mut total_count = 0usize;
     for folder in &folders {
-        status(format!("Cataloging {folder}… ({total_count} media items found)"));
+        status(format!(
+            "Cataloging {folder}… ({total_count} media items found)"
+        ));
         let names = tokio::time::timeout(
             std::time::Duration::from_secs(30),
             client.list_dir(format!("/DCIM/{folder}")),
@@ -434,13 +436,28 @@ pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>
                         let date_str = dt.format("%Y-%m-%d").to_string();
                         let month_key = dt.format("%Y-%m").to_string();
                         let month_label = dt.format("%B %Y").to_string();
-                        let week_label = format!("Week {}, {}", dt.format("%U"), dt.format("%b %Y"));
+                        let week_label =
+                            format!("Week {}, {}", dt.format("%U"), dt.format("%b %Y"));
                         let date_label = dt.format("%a, %b %e, %Y").to_string();
-                        (info.size as u64, ts, date_str, month_key, month_label, week_label, date_label)
+                        (
+                            info.size as u64,
+                            ts,
+                            date_str,
+                            month_key,
+                            month_label,
+                            week_label,
+                            date_label,
+                        )
                     }
-                    Err(_) => {
-                        (0, 0, "Unknown Date".into(), "Unknown".into(), "Unknown Month".into(), "Unknown Week".into(), "Unknown Date".into())
-                    }
+                    Err(_) => (
+                        0,
+                        0,
+                        "Unknown Date".into(),
+                        "Unknown".into(),
+                        "Unknown Month".into(),
+                        "Unknown Week".into(),
+                        "Unknown Date".into(),
+                    ),
                 };
 
             if live && resources.len() > 1 {
@@ -451,7 +468,9 @@ pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>
 
             total_count += 1;
             if total_count % 150 == 0 {
-                status(format!("Cataloging {folder}… ({total_count} media items found)"));
+                status(format!(
+                    "Cataloging {folder}… ({total_count} media items found)"
+                ));
             }
 
             items.push(MediaItem {
@@ -475,7 +494,11 @@ pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>
             });
         }
     }
-    items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.path.cmp(&a.path)));
+    items.sort_by(|a, b| {
+        b.timestamp
+            .cmp(&a.timestamp)
+            .then_with(|| b.path.cmp(&a.path))
+    });
     Ok(items)
 }
 
@@ -522,32 +545,72 @@ pub async fn export_media(
     cancel: &std::sync::atomic::AtomicBool,
     mut progress: impl FnMut(u64, u64, String),
 ) -> Result<PathBuf> {
+    export_planned(
+        dest,
+        paths
+            .into_iter()
+            .map(|source| ExportEntry {
+                source,
+                folder: String::new(),
+            })
+            .collect(),
+        cancel,
+        &mut progress,
+    )
+    .await
+}
+
+#[derive(Clone, Debug)]
+pub struct ExportEntry {
+    pub source: String,
+    /// Relative folder, validated before opening a device or creating output.
+    pub folder: String,
+}
+
+pub fn validate_export_plan(entries: &[ExportEntry]) -> Result<()> {
+    ensure!(!entries.is_empty(), "Select at least one photo or video");
+    let mut outputs = std::collections::HashSet::new();
+    for entry in entries {
+        for component in entry.folder.split('/').filter(|c| !c.is_empty()) {
+            local_name(&format!("/DCIM/{component}"))?;
+        }
+        ensure!(
+            !entry.folder.starts_with('/')
+                && (!entry.folder.ends_with('/') || entry.folder.is_empty())
+                && !entry.folder.contains("//"),
+            "Invalid export folder"
+        );
+        let name = local_name(&entry.source)?;
+        let key = format!("{}/{name}", entry.folder).to_lowercase();
+        ensure!(
+            outputs.insert(key.clone()) && outputs.insert(format!("{key}.partial")),
+            "Duplicate output name: {name}. Choose Source folders or export in separate batches."
+        );
+    }
+    Ok(())
+}
+
+pub async fn export_planned(
+    dest: &Path,
+    entries: Vec<ExportEntry>,
+    cancel: &std::sync::atomic::AtomicBool,
+    mut progress: impl FnMut(u64, u64, String),
+) -> Result<PathBuf> {
     ensure!(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
         "Cancelled before export"
     );
-    ensure!(!paths.is_empty(), "Select at least one photo or video");
-    let mut names = std::collections::HashSet::new();
-    for path in &paths {
-        ensure!(
-            !cancel.load(std::sync::atomic::Ordering::Relaxed),
-            "Cancelled during preparation"
-        );
-        ensure!(
-            names.insert(local_name(path)?.to_ascii_lowercase()),
-            "Selection contains duplicate filenames from different folders; export those in separate batches"
-        );
-    }
+    validate_export_plan(&entries)?;
     let mut client = afc().await?;
     let mut total = 0u64;
-    for path in &paths {
+    for entry in &entries {
         ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
             "Cancelled during preparation"
         );
         total += tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            client.get_file_info(path),
+            client.get_file_info(&entry.source),
         )
         .await
         .context("Media size lookup timed out")??
@@ -559,20 +622,32 @@ pub async fn export_media(
     let mut files = Vec::new();
     let mut completed = 0u64;
     let start = Instant::now();
-    let total_files = paths.len();
-    for (idx, path) in paths.into_iter().enumerate() {
+    let total_files = entries.len();
+    for (idx, entry) in entries.into_iter().enumerate() {
         ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
             "Cancelled; completed files retained"
         );
+        let path = entry.source;
         let name = local_name(&path)?;
+        let output = dest.join(&entry.folder);
+        tokio::fs::create_dir_all(&output).await?;
         let file_num = idx + 1;
-        let copied = copy_one_observed(&mut client, &path, dest, 1024 * 1024, cancel, &mut |n| {
-            progress(completed + n, total, format!("{name} ({file_num}/{total_files})"))
-        })
-        .await?;
+        let mut copied =
+            copy_one_observed(&mut client, &path, &output, 1024 * 1024, cancel, &mut |n| {
+                progress(
+                    completed + n,
+                    total,
+                    format!("{name} ({file_num}/{total_files})"),
+                )
+            })
+            .await?;
         completed += copied.bytes;
+        if !entry.folder.is_empty() {
+            copied.filename = format!("{}/{}", entry.folder, copied.filename);
+        }
         files.push(copied);
+        checkpoint(dest, &files).await?;
     }
     let elapsed = start.elapsed().as_secs_f64();
     eprintln!(
@@ -582,7 +657,20 @@ pub async fn export_media(
         elapsed,
         completed as f64 / 1_048_576.0 / elapsed,
     );
-    // Return a synthetic path pointing at the export directory itself
+    let report = TransferReport {
+        transport: "Apple USB service + pure Rust AFC",
+        chunk_kib: 1024,
+        files,
+        total_bytes: completed,
+        transfer_seconds: elapsed,
+        mib_per_second: completed as f64 / 1_048_576.0 / elapsed.max(0.001),
+        verification: "stream SHA-256 matches destination reread; source size and mtime stable; no independent source digest",
+    };
+    tokio::fs::write(
+        dest.join("transfer.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )
+    .await?;
     Ok(dest.to_path_buf())
 }
 
@@ -715,6 +803,76 @@ pub async fn cli_main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn organized_export_rejects_unsafe_and_colliding_paths() {
+        let entry = |source: &str, folder: &str| ExportEntry {
+            source: source.into(),
+            folder: folder.into(),
+        };
+        for folder in [
+            "../outside",
+            "C:\\outside",
+            "/absolute",
+            "day/",
+            "day//sub",
+            "CON",
+            "day/..",
+        ] {
+            assert!(
+                validate_export_plan(&[entry("/DCIM/100APPLE/A.JPG", folder)]).is_err(),
+                "{folder}"
+            );
+        }
+        assert!(
+            validate_export_plan(&[
+                entry("/DCIM/100APPLE/A.JPG", "Photos"),
+                entry("/DCIM/101APPLE/a.jpg", "photos")
+            ])
+            .is_err()
+        );
+        assert!(
+            validate_export_plan(&[
+                entry("/DCIM/100APPLE/A.JPG", ""),
+                entry("/DCIM/100APPLE/A.JPG.partial", "")
+            ])
+            .is_err()
+        );
+        assert!(
+            validate_export_plan(&[
+                entry("/DCIM/100APPLE/A.JPG", "100APPLE"),
+                entry("/DCIM/101APPLE/A.JPG", "101APPLE")
+            ])
+            .is_ok()
+        );
+        assert!(validate_export_plan(&[entry("/DCIM/100APPLE/A.JPG", "")]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn invalid_or_cancelled_export_never_creates_output() {
+        let dest = std::env::temp_dir().join(format!("itool-plan-test-{}", std::process::id()));
+        assert!(!dest.exists());
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        assert!(
+            export_planned(&dest, vec![], &cancel, |_, _, _| {})
+                .await
+                .is_err()
+        );
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            export_planned(
+                &dest,
+                vec![ExportEntry {
+                    source: "/DCIM/A.JPG".into(),
+                    folder: String::new()
+                }],
+                &cancel,
+                |_, _, _| {}
+            )
+            .await
+            .is_err()
+        );
+        assert!(!dest.exists());
+    }
     #[test]
     fn destination_paths_stay_inside_export_directory() {
         assert_eq!(

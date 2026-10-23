@@ -20,3 +20,8 @@ The Rust CLI successfully exported seven resources matching the 3uTools baseline
 
 ## Product principles
 Preserve bytes. Make selection and progress legible. Report incomplete transfers honestly. Never overwrite existing media.
+
+
+## Daily editor workflow
+
+Browse in a grid or details view; order by time, size, or filename; group by time, media type, or DCIM source folder. Keep a selection basket across filters, inspect every resource in export review, and organize copies by device file day/month, type, or source folder. Every batch uses a new destination. Persist completed-file evidence locally and expose interrupted output. Albums, Favorites, EXIF capture-date indexing, conversion, and automatic incremental sync remain unsupported.
