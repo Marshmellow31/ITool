@@ -481,33 +481,39 @@ pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>
 
 pub async fn read_thumbnail(client: &mut AfcClient, path: &str) -> Result<Vec<u8>> {
     local_name(path)?;
-    let thumb = format!("/PhotoData/Thumbnails/V2{path}/5005.JPG");
-    let info = tokio::time::timeout(
-        std::time::Duration::from_secs(8),
-        client.get_file_info(&thumb),
-    )
-    .await
-    .context("Preview metadata timed out")??;
-    ensure!(
-        info.size > 0 && info.size <= 2 * 1024 * 1024,
-        "Preview unavailable or too large"
-    );
-    let mut source = tokio::time::timeout(
-        std::time::Duration::from_secs(8),
-        client.open(&thumb, AfcFopenMode::RdOnly),
-    )
-    .await
-    .context("Preview open timed out")??;
-    let data = tokio::time::timeout(std::time::Duration::from_secs(8), source.read_n(info.size))
+    const CANDIDATES: &[&str] = &["5005.JPG", "4034.JPG", "5003.JPG", "3003.JPG", "1001.JPG"];
+    for candidate in CANDIDATES {
+        let thumb = format!("/PhotoData/Thumbnails/V2{path}/{candidate}");
+        if let Ok(Ok(info)) = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.get_file_info(&thumb),
+        )
         .await
-        .context("Preview read timed out")?;
-    let closed = tokio::time::timeout(std::time::Duration::from_secs(5), source.close())
-        .await
-        .context("Preview close timed out")?;
-    let data = data?;
-    closed?;
-    ensure!(data.len() == info.size, "Incomplete preview");
-    Ok(data)
+        {
+            if info.size > 0 && info.size <= 4 * 1024 * 1024 {
+                if let Ok(Ok(mut source)) = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    client.open(&thumb, AfcFopenMode::RdOnly),
+                )
+                .await
+                {
+                    let data = tokio::time::timeout(
+                        std::time::Duration::from_secs(4),
+                        source.read_n(info.size),
+                    )
+                    .await;
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), source.close())
+                        .await;
+                    if let Ok(Ok(data)) = data {
+                        if data.len() == info.size {
+                            return Ok(data);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bail!("Thumbnail unavailable for {path}")
 }
 
 pub async fn export_media(
@@ -553,14 +559,16 @@ pub async fn export_media(
     let mut files = Vec::new();
     let mut completed = 0u64;
     let start = Instant::now();
-    for path in paths {
+    let total_files = paths.len();
+    for (idx, path) in paths.into_iter().enumerate() {
         ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
             "Cancelled; completed files retained"
         );
         let name = local_name(&path)?;
+        let file_num = idx + 1;
         let copied = copy_one_observed(&mut client, &path, dest, 1024 * 1024, cancel, &mut |n| {
-            progress(completed + n, total, name.clone())
+            progress(completed + n, total, format!("{name} ({file_num}/{total_files})"))
         })
         .await?;
         completed += copied.bytes;
