@@ -98,6 +98,8 @@ struct Desktop {
     thumbnail_status: HashMap<String, ThumbnailStatus>,
     texture_lru: VecDeque<String>,
     last_clicked_index: Option<usize>,
+    drag_active: bool,
+    drag_base_selected: HashSet<String>,
 
     // Filters and controls
     search: String,
@@ -307,6 +309,8 @@ impl Desktop {
             thumbnail_status: HashMap::new(),
             texture_lru: VecDeque::new(),
             last_clicked_index: None,
+            drag_active: false,
+            drag_base_selected: HashSet::new(),
 
             search: String::new(),
             media_filter: MediaFilter::All,
@@ -345,6 +349,8 @@ impl Desktop {
         self.texture_lru.clear();
         self.selected.clear();
         self.last_clicked_index = None;
+        self.drag_active = false;
+        self.drag_base_selected.clear();
         let _ = self.jobs.send(Job::Scan);
     }
 
@@ -1334,6 +1340,44 @@ impl eframe::App for Desktop {
                     .map(|(idx, item)| (item.path.clone(), idx))
                     .collect();
 
+                let gallery_rect = ui.max_rect();
+                let is_primary_down = ui.input(|i| i.pointer.primary_down());
+                let is_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
+                let press_origin = ui.input(|i| i.pointer.press_origin());
+                let latest_pos = ui.input(|i| i.pointer.latest_pos());
+                let is_shift = ui.input(|i| i.modifiers.shift);
+                let is_ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+
+                // Detect drag-to-select marquee
+                let mut active_marquee: Option<egui::Rect> = None;
+                if is_dragging && is_primary_down {
+                    if let (Some(origin), Some(pos)) = (press_origin, latest_pos) {
+                        if gallery_rect.contains(origin) {
+                            if !self.drag_active {
+                                self.drag_active = true;
+                                self.drag_base_selected = if is_shift || is_ctrl {
+                                    self.selected.clone()
+                                } else {
+                                    HashSet::new()
+                                };
+                            }
+                            active_marquee = Some(egui::Rect::from_two_pos(origin, pos));
+                            ctx.request_repaint();
+
+                            // Auto-scroll when dragging near top or bottom edges
+                            if pos.y < gallery_rect.min.y + 45.0 {
+                                ui.scroll_with_delta(Vec2::new(0.0, 20.0));
+                            } else if pos.y > gallery_rect.max.y - 45.0 {
+                                ui.scroll_with_delta(Vec2::new(0.0, -20.0));
+                            }
+                        }
+                    }
+                } else if !is_primary_down && self.drag_active {
+                    self.drag_active = false;
+                    self.drag_base_selected.clear();
+                }
+
+                let mut intersected_in_drag: HashSet<String> = HashSet::new();
                 let mut card_click: Option<(usize, bool)> = None; // (index, is_shift)
                 let mut retry_preview: Option<String> = None;
                 let mut group_toggle: Option<(Vec<String>, bool)> = None; // (paths, select_all)
@@ -1379,9 +1423,12 @@ impl eframe::App for Desktop {
                                                 self.selected.contains(&item.path),
                                                 self.textures.get(&item.path),
                                                 status,
+                                                active_marquee,
+                                                &mut intersected_in_drag,
                                                 &mut card_click,
                                                 &mut retry_preview,
                                                 self.busy,
+                                                self.drag_active,
                                             );
 
                                             if !has_status {
@@ -1518,9 +1565,12 @@ impl eframe::App for Desktop {
                                                     self.selected.contains(&item.path),
                                                     self.textures.get(&item.path),
                                                     status,
+                                                    active_marquee,
+                                                    &mut intersected_in_drag,
                                                     &mut card_click,
                                                     &mut retry_preview,
                                                     self.busy,
+                                                    self.drag_active,
                                                 );
 
                                                 if !has_status {
@@ -1539,6 +1589,28 @@ impl eframe::App for Desktop {
                                 ui.add_space(14.0);
                             }
                         });
+                }
+
+                // If drag selection was active, update selection and paint selection box
+                if let Some(marquee) = active_marquee {
+                    let mut new_selection = self.drag_base_selected.clone();
+                    for p in &intersected_in_drag {
+                        new_selection.insert(p.clone());
+                    }
+                    self.selected = new_selection;
+
+                    // Paint green selection marquee rectangle overlay
+                    ui.painter().rect_filled(
+                        marquee,
+                        CornerRadius::same(3),
+                        Color32::from_rgba_premultiplied(22, 101, 52, 35),
+                    );
+                    ui.painter().rect_stroke(
+                        marquee,
+                        CornerRadius::same(3),
+                        Stroke::new(1.5, Color32::from_rgb(22, 101, 52)),
+                        egui::StrokeKind::Inside,
+                    );
                 }
 
                 // Handle single-click and Shift-click range selection
@@ -1602,17 +1674,30 @@ impl Desktop {
         is_selected: bool,
         texture: Option<&egui::TextureHandle>,
         thumb_status: ThumbnailStatus,
+        active_marquee: Option<egui::Rect>,
+        intersected_in_drag: &mut HashSet<String>,
         card_click: &mut Option<(usize, bool)>,
         retry_preview: &mut Option<String>,
         is_busy: bool,
+        is_drag_active: bool,
     ) {
         let tile_size = Vec2::new(card_width, card_height);
-        let (rect, response) = ui.allocate_exact_size(tile_size, egui::Sense::click());
+        let (rect, response) = ui.allocate_exact_size(tile_size, egui::Sense::click_and_drag());
         let is_hovered = response.hovered();
         let is_clicked = response.clicked();
 
-        // Handle click event with Shift modifier detection
-        if is_clicked && !is_busy {
+        let is_in_marquee = if let Some(marquee) = active_marquee {
+            rect.intersects(marquee)
+        } else {
+            false
+        };
+        if is_in_marquee {
+            intersected_in_drag.insert(item.path.clone());
+        }
+        let is_selected = is_selected || is_in_marquee;
+
+        // Handle click event with Shift modifier detection (suppressed during dragging)
+        if is_clicked && !is_busy && !is_drag_active {
             let is_shift = ui.input(|i| i.modifiers.shift);
             *card_click = Some((index, is_shift));
         }
@@ -1677,7 +1762,7 @@ impl Desktop {
             });
             ui.add_space(4.0);
             ui.label(
-                RichText::new("Click to select · Shift+Click for range")
+                RichText::new("Click to select · Shift+Click for range · Drag to select")
                     .size(10.5)
                     .color(Color32::from_rgb(156, 163, 175)),
             );
@@ -1765,7 +1850,7 @@ impl Desktop {
                     },
                 );
 
-                if is_clicked && is_hovered {
+                if is_clicked && is_hovered && !is_drag_active {
                     *retry_preview = Some(item.path.clone());
                 }
             }
@@ -1970,5 +2055,21 @@ mod desktop_tests {
             assert!(card_width >= 100.0);
             assert!(card_width <= 250.0);
         }
+    }
+
+    #[test]
+    fn test_drag_selection_marquee_intersection() {
+        // Test rectangle intersection math used by drag marquee selection
+        let marquee = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(300.0, 300.0));
+
+        let card_inside = egui::Rect::from_min_max(egui::pos2(120.0, 120.0), egui::pos2(200.0, 200.0));
+        let card_overlapping = egui::Rect::from_min_max(egui::pos2(250.0, 250.0), egui::pos2(350.0, 350.0));
+        let card_outside = egui::Rect::from_min_max(egui::pos2(400.0, 400.0), egui::pos2(500.0, 500.0));
+        let card_adjacent = egui::Rect::from_min_max(egui::pos2(300.0, 100.0), egui::pos2(400.0, 200.0));
+
+        assert!(card_inside.intersects(marquee));
+        assert!(card_overlapping.intersects(marquee));
+        assert!(!card_outside.intersects(marquee));
+        assert!(card_adjacent.intersects(marquee));
     }
 }
