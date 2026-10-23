@@ -1,5 +1,6 @@
 /target/
 /.tools/
+/.agents/
 /baseline/
 /analysis/private/
 /exports/
