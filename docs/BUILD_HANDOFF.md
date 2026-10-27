@@ -26,3 +26,12 @@ The final `cargo build --release --locked --features desktop --bins` succeeded. 
 The new local package is `dist/ITool-reference-ui-dev-20261027/`. `ITool Demo.lnk` launches the sample library without a console. The desktop executable was opened with `--demo --demo-light`; demo actions route through sample screens without phone operations or export copies. The previous development package is preserved.
 
 Branch remains `codex/guided-ui-roadmap`, base commit `90e2e6a`. Changes are uncommitted and unpushed; no PR, merge or release was published. Automated tests and phone validation remain deferred.
+
+## v0.3.0 release build — 27 October 2026
+
+- Updated the package version and lockfile to 0.3.0; release notes are in `docs/releases/v0.3.0.md`.
+- `cargo build --release --locked --features desktop --bins` completed successfully. Two unused-code warnings remain.
+- The packaged CLI reports `itool 0.3.0`. Desktop and CLI executables, the portable ZIP and SHA-256 checksums are prepared under `dist/`.
+- The packaged desktop executable was started without arguments in regular mode. This confirms process startup, not iPhone detection or export behavior.
+- Tests and physical-device validation remain deferred at the user's request. Demo screenshots are the existing visual evidence; no fresh transfer or codec/timestamp result is claimed.
+- The user authorized publication of the new executable release. The preceding uncommitted/unpushed statements describe earlier development snapshots; the guided UI source was subsequently pushed to main as `4e4c483`.

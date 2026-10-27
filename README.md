@@ -2,7 +2,7 @@
 
 A native Windows app and CLI for copying accessible iPhone photos, videos and Live Photo resources over USB. Original files are copied without conversion. Optional compatible copies are additional files.
 
-**Development build:** the guided UI and roadmap features below are implemented in source. Compilation is distinct from tests and physical-device results. This work does not publish a new GitHub release or replace the existing 0.2.0 release.
+Download [ITool v0.3.0 for Windows x64](https://github.com/Marshmellow31/ITool/releases/tag/v0.3.0). Choose the portable ZIP or standalone desktop EXE. The guided UI and features below are included; local builds and demo screenshots do not establish physical-device behavior.
 
 ## Screenshots
 

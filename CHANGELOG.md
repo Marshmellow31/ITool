@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased development build — 2026-10-27
+## 0.3.0 - 2026-10-27
 
 - Replace the single workspace with Connect, Choose media, Export and Results screens; neutral light/dark themes with blue actions and a paired-frame app icon.
 - Add editable named-batch folders and a folder/resource preview; retain gallery selection, sorting, grouping and thumbnail loading.
