@@ -137,16 +137,43 @@ Tests, when authorized, run separately with `cargo test --all-targets --features
 
 ## Roadmap status
 
-- [x] Organized exports and editable named-batch folders (implemented in source).
-- [x] Incremental exports with checked local history (implemented; device validation pending).
-- [x] Optional compatible copies (implemented; FFmpeg/codecs required; media validation pending).
-- [x] Capture timestamps (implemented with fallbacks; media/NTFS validation pending).
-- [x] Conditional Albums/Favorites (implemented; physical-phone access/schema support unverified).
-- [ ] Device, interruption and long-batch validation of this development build.
-- [ ] Measured USB 3 benchmarks.
-- [ ] Reliable cloud-only original retrieval and broader Photos-schema coverage.
-- [ ] Byte-offset resume for partial files.
-- [ ] Verified HDR-to-SDR tone mapping.
+Implementation status below is **verified in source**, not proof of physical-device behavior. Future items are **recommendation-not-fact**; research items **need confirmation**. Priorities describe a suggested order, not release dates or commitments.
+
+| Existing capability | Status | Remaining validation |
+| --- | --- | --- |
+| Organized exports and editable batch folders | Implemented in source | Device exports, filename conflicts and destination behavior |
+| Incremental exports with checked local history | Implemented in source | Device changes, modified/missing saved copies and interrupted batches |
+| Additional JPEG/MP4 copies | Implemented in source; local FFmpeg/codecs required | Media quality, playback, orientation and failure handling |
+| Capture timestamps | Implemented in source with fallbacks | Known media dates, timezone handling and NTFS timestamps |
+| Conditional Albums/Favorites | Implemented in source | Physical-phone access, schema compatibility and mapping accuracy |
+
+### Future scope
+
+Full evidence, implementation boundaries, relative effort, acceptance checks and milestone details are in [FUTURE_SCOPE.md](docs/FUTURE_SCOPE.md). Every addition must preserve original media, avoid overwriting existing files and keep device access read-only.
+
+| Order | Future capability | What it adds | Status / key condition |
+| --- | --- | --- | --- |
+| First | Validate the current build | Device, interruption, disk-full and long-batch checks | Pending; follow [validation handoff](docs/VALIDATION_HANDOFF.md) before claiming support |
+| 1 | Export preflight | Required bytes, free space, filesystem, permissions, conflicts and tool checks | Proposed; conversion space remains an estimate |
+| 2 | Retry failed items and recover batches | Reconnect or restart the app and finish remaining originals | Proposed; revalidate identity/source and completed copies; restart unfinished files from zero initially |
+| 3 | General archive verification | Detect missing or modified files in grouped exports without a phone | Proposed; verify local files against recorded hashes; reject unsafe manifest paths |
+| 4 | Media details and metadata sidecars | Dimensions, duration, codecs, capture dates and available album/favorite data in JSON/CSV | Proposed; record provenance and unknowns; location metadata opt-in |
+| 5 | Stronger Live Photo, RAW+JPEG and edit-resource handling | Better resource association and preservation of accessible AAE/edit sidecars | Proposed; retain originals; asset mapping and Apple reimport compatibility need confirmation |
+| 6 | Large-library browsing and offline previews | Progressive scanning, optional persistent preview cache, prior-export browsing and richer filters | Proposed; bounded, device-scoped, clearable cache; previews never substitute for originals |
+| 7 | Album output and export presets | Reusable settings and organization by actual Photos albums | Proposed; define multiple-album membership and name conflicts; start with an album index |
+| 8 | Byte-offset pause/resume | Continue partway through a large video | Research; validate the partial prefix and source before appending, then verify the complete copy |
+| 9 | exFAT external-drive export | Save directly to common portable SSDs | Research; replace NTFS-dependent finalization while preserving no-overwrite behavior |
+| 10 | Measured performance tuning / USB 3 benchmarks | Compare buffer sizes and investigate bounded read/write/hash overlap | Proposed measurement, then experiments; no speed or link-rate claim without hardware evidence |
+| 11 | HDR-to-SDR and Live Photo viewing copies | Additional playback-friendly derivatives | Research; validate color, orientation and audio sync; originals stay intact |
+| Metadata research | Broader Photos-schema coverage | More reliable album/favorite/resource mapping across supported iOS versions | Needs confirmation; unsupported or inconsistent snapshots must remain clearly unavailable |
+| Optional | Read-only device overview | Model, iOS version, connection state and accessible-media storage | Needs confirmation per field; distinguish media-volume capacity from whole-device capacity |
+| Optional | Battery and diagnostic information | A small set of useful read-only device values | Research; symbols alone do not establish battery health, repair history or part authenticity |
+| Optional | Accessible-file browser | Browse permitted paths and copy files to the PC | Proposed; begin with media paths; no device delete, rename or upload |
+| Optional | Local Apple/iCloud export-folder import | Organize and verify user-selected local media | Proposed; keep provenance separate from USB and verify actual downloaded bytes |
+| Separate discovery | Contacts, messages and local-backup inspection | Explore explicit user-selected local backups | Needs confirmation; separate privacy/access/encryption design; no recovery or decryption promise |
+| Deferred | Direct cloud-only original retrieval | Access originals absent from USB-visible storage | Unproven; first provide unavailable-original status and an Apple-supported download handoff |
+
+Device cleanup/deletion, two-way sync, Photos database writes, firmware restore/flashing, jailbreak/AFC2 access, lock bypass and backup-password manipulation are outside this read-only roadmap. See the [scope boundaries](docs/FUTURE_SCOPE.md#deferred-work-and-scope-boundaries).
 
 Historical evidence: an earlier CLI copied seven resources totaling 185,252,866 bytes in 11.178 seconds, matching a 3uTools sample byte-for-byte. The 3uTools batch was not timed. This does not validate the new UI or roadmap features.
 
