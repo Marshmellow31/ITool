@@ -1,7 +1,10 @@
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Vec2};
+use itool::workflow::{ExportOptions, ExportOutcome};
 use itool::{ExportEntry, MediaItem};
+#[path = "desktop/ui.rs"]
+mod ui;
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::PathBuf,
@@ -114,16 +117,16 @@ enum Job {
     Scan,
     Preview(String),
     CancelPreviews,
-    Export(PathBuf, Vec<ExportEntry>),
+    Export(PathBuf, Vec<ExportEntry>, ExportOptions),
 }
 
 enum Event {
     Status(String),
     PreviewReset,
-    Scanned(Vec<MediaItem>),
+    Scanned(Box<itool::library::LibrarySnapshot>),
     Preview(String, Option<egui::ColorImage>),
     Progress(u64, u64, String),
-    Finished(PathBuf),
+    Finished(ExportOutcome),
     Error(String),
 }
 
@@ -135,7 +138,15 @@ struct MonthSummary {
     bytes: u64,
 }
 
-const GREEN: Color32 = Color32::from_rgb(22, 101, 52);
+const ACCENT: Color32 = Color32::from_rgb(59, 106, 250);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Connect,
+    Library,
+    Export,
+    Results,
+}
 #[derive(Clone, Copy)]
 struct Palette {
     text: Color32,
@@ -153,27 +164,27 @@ impl Palette {
     fn new(dark: bool) -> Self {
         if dark {
             Self {
-                text: Color32::from_rgb(231, 237, 233),
-                muted: Color32::from_rgb(171, 185, 176),
-                panel: Color32::from_rgb(28, 35, 31),
-                sidebar: Color32::from_rgb(24, 30, 27),
-                canvas: Color32::from_rgb(18, 24, 21),
-                border: Color32::from_rgb(77, 94, 83),
-                accent: Color32::from_rgb(137, 218, 165),
-                tint: Color32::from_rgb(35, 63, 45),
+                text: Color32::from_rgb(240, 242, 247),
+                muted: Color32::from_rgb(171, 181, 199),
+                panel: Color32::from_rgb(28, 33, 42),
+                sidebar: Color32::from_rgb(30, 36, 45),
+                canvas: Color32::from_rgb(24, 30, 37),
+                border: Color32::from_rgb(53, 62, 78),
+                accent: Color32::from_rgb(130, 158, 255),
+                tint: Color32::from_rgb(38, 49, 80),
                 danger: Color32::from_rgb(255, 157, 148),
                 warning: Color32::from_rgb(240, 193, 122),
             }
         } else {
             Self {
-                text: Color32::from_rgb(30, 43, 36),
-                muted: Color32::from_rgb(83, 99, 90),
+                text: Color32::from_rgb(25, 29, 39),
+                muted: Color32::from_rgb(89, 99, 119),
                 panel: Color32::WHITE,
-                sidebar: Color32::from_rgb(249, 250, 251),
-                canvas: Color32::from_rgb(243, 244, 246),
-                border: Color32::from_rgb(183, 196, 187),
-                accent: GREEN,
-                tint: Color32::from_rgb(230, 242, 234),
+                sidebar: Color32::from_rgb(252, 252, 254),
+                canvas: Color32::from_rgb(250, 251, 253),
+                border: Color32::from_rgb(221, 226, 236),
+                accent: ACCENT,
+                tint: Color32::from_rgb(232, 237, 255),
                 danger: Color32::from_rgb(158, 47, 39),
                 warning: Color32::from_rgb(130, 70, 15),
             }
@@ -183,7 +194,7 @@ impl Palette {
 fn secondary(label: impl Into<String>) -> egui::Button<'static> {
     egui::Button::new(RichText::new(label.into()).size(13.0))
         .corner_radius(5)
-        .min_size(Vec2::new(0.0, 28.0))
+        .min_size(Vec2::new(0.0, 36.0))
 }
 fn toggle(label: impl Into<String>, active: bool, dark: bool) -> egui::Button<'static> {
     let p = Palette::new(dark);
@@ -198,7 +209,7 @@ fn toggle(label: impl Into<String>, active: bool, dark: bool) -> egui::Button<'s
         if active { p.accent } else { p.border },
     ))
     .corner_radius(5)
-    .min_size(Vec2::new(0.0, 28.0))
+    .min_size(Vec2::new(0.0, 36.0))
     .selected(active)
 }
 fn theme_file() -> Option<PathBuf> {
@@ -236,9 +247,9 @@ fn apply_theme(ctx: &egui::Context, dark: bool) {
     let p = Palette::new(dark);
     ctx.set_theme(theme);
     let mut style = (*ctx.style_of(theme)).clone();
-    style.spacing.item_spacing = Vec2::new(8.0, 4.0);
-    style.spacing.button_padding = Vec2::new(10.0, 5.0);
-    style.spacing.interact_size.y = 28.0;
+    style.spacing.item_spacing = Vec2::new(12.0, 8.0);
+    style.spacing.button_padding = Vec2::new(14.0, 9.0);
+    style.spacing.interact_size.y = 36.0;
     style.visuals = if dark {
         egui::Visuals::dark()
     } else {
@@ -250,6 +261,7 @@ fn apply_theme(ctx: &egui::Context, dark: bool) {
     style.visuals.panel_fill = p.panel;
     style.visuals.window_fill = p.panel;
     style.visuals.window_stroke = Stroke::new(1.0, p.border);
+    style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
     style.visuals.selection.bg_fill = p.tint;
     style.visuals.selection.stroke = Stroke::new(1.5, p.accent);
     style.visuals.widgets.inactive.bg_fill = p.border;
@@ -263,21 +275,25 @@ fn apply_theme(ctx: &egui::Context, dark: bool) {
     style.visuals.widgets.active.bg_fill = p.accent;
     style.visuals.widgets.active.weak_bg_fill = p.tint;
     style.visuals.widgets.active.bg_stroke = Stroke::new(1.5, p.accent);
-    style.visuals.widgets.active.fg_stroke = Stroke::new(1.5, p.accent);
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.5, p.text);
     style.visuals.window_corner_radius = CornerRadius::same(8);
     style.visuals.widgets.inactive.corner_radius = CornerRadius::same(5);
     style.visuals.widgets.hovered.corner_radius = CornerRadius::same(5);
     style.visuals.widgets.active.corner_radius = CornerRadius::same(5);
     for (kind, size) in [
-        (egui::TextStyle::Body, 13.0),
-        (egui::TextStyle::Button, 13.0),
-        (egui::TextStyle::Small, 11.5),
+        (egui::TextStyle::Body, 14.0),
+        (egui::TextStyle::Button, 14.0),
+        (egui::TextStyle::Small, 12.0),
         (egui::TextStyle::Heading, 19.0),
     ] {
         style
             .text_styles
             .insert(kind, egui::FontId::proportional(size));
     }
+    style.text_styles.insert(
+        egui::TextStyle::Heading,
+        egui::FontId::new(21.0, egui::FontFamily::Name("UI Semibold".into())),
+    );
     ctx.set_style_of(theme, style);
 }
 
@@ -304,6 +320,21 @@ fn safe_truncate(s: &str, max_chars: usize) -> String {
 }
 
 struct Desktop {
+    logo: egui::TextureHandle,
+    illustration: egui::TextureHandle,
+    illustration_dark: egui::TextureHandle,
+    screen: Screen,
+    settings_open: bool,
+    connection_help: bool,
+    folder_name: String,
+    options: ExportOptions,
+    outcome: Option<ExportOutcome>,
+    metadata: BTreeMap<String, itool::library::AssetMetadata>,
+    metadata_status: String,
+    albums_available: bool,
+    favorites_available: bool,
+    album_filter: Option<String>,
+    favorites_only: bool,
     jobs: mpsc::Sender<Job>,
     events: mpsc::Receiver<Event>,
     cancel: Arc<AtomicBool>,
@@ -325,7 +356,6 @@ struct Desktop {
     selected_only: bool,
     tile_size: f32,
     export_layout: ExportLayout,
-    review_open: bool,
     export_folder: Option<PathBuf>,
     selection_anchor: Option<String>,
     demo: bool,
@@ -377,24 +407,25 @@ impl Desktop {
                             pending_previews.clear();
                             let _ = tx.send(Event::PreviewReset);
                             preview_client = None;
-                            let result = runtime.block_on(itool::scan_media(|s| {
+                            let result = runtime.block_on(itool::library::scan(|s| {
                                 let _ = tx.send(Event::Status(s));
                                 ctx.request_repaint();
                             }));
                             let _ = tx.send(match result {
-                                Ok(items) => Event::Scanned(items),
+                                Ok(items) => Event::Scanned(Box::new(items)),
                                 Err(e) => Event::Error(format!("{e:#}")),
                             });
                             ctx.request_repaint();
                             continue;
                         }
-                        Ok(Job::Export(dest, paths)) => {
+                        Ok(Job::Export(dest, paths, options)) => {
                             pending_previews.clear();
                             let _ = tx.send(Event::PreviewReset);
                             preview_client = None;
-                            let result = runtime.block_on(itool::export_planned(
+                            let result = runtime.block_on(itool::workflow::export(
                                 &dest,
                                 paths,
+                                options,
                                 &cancel_worker,
                                 |done, total, name| {
                                     let _ = tx.send(Event::Progress(done, total, name));
@@ -427,24 +458,25 @@ impl Desktop {
                             pending_previews.clear();
                             let _ = tx.send(Event::PreviewReset);
                             preview_client = None;
-                            let result = runtime.block_on(itool::scan_media(|s| {
+                            let result = runtime.block_on(itool::library::scan(|s| {
                                 let _ = tx.send(Event::Status(s));
                                 ctx.request_repaint();
                             }));
                             let _ = tx.send(match result {
-                                Ok(items) => Event::Scanned(items),
+                                Ok(items) => Event::Scanned(Box::new(items)),
                                 Err(e) => Event::Error(format!("{e:#}")),
                             });
                             ctx.request_repaint();
                             break;
                         }
-                        Job::Export(dest, paths) => {
+                        Job::Export(dest, paths, options) => {
                             pending_previews.clear();
                             let _ = tx.send(Event::PreviewReset);
                             preview_client = None;
-                            let result = runtime.block_on(itool::export_planned(
+                            let result = runtime.block_on(itool::workflow::export(
                                 &dest,
                                 paths,
+                                options,
                                 &cancel_worker,
                                 |done, total, name| {
                                     let _ = tx.send(Event::Progress(done, total, name));
@@ -521,30 +553,109 @@ impl Desktop {
             }
         });
 
-        // Use Windows' installed UI font when available; retain egui's portable fallback.
-        if let Ok(windir) = std::env::var("WINDIR") {
-            if let Ok(bytes) = std::fs::read(PathBuf::from(windir).join("Fonts/segoeui.ttf")) {
-                let mut fonts = egui::FontDefinitions::default();
-                fonts.font_data.insert(
-                    "Segoe UI".into(),
-                    Arc::new(egui::FontData::from_owned(bytes)),
-                );
+        let mut fonts = egui::FontDefinitions::default();
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+        for (name, file) in [
+            ("Segoe UI", "segoeui.ttf"),
+            ("Segoe Semibold", "seguisb.ttf"),
+        ] {
+            if let Ok(bytes) = std::fs::read(PathBuf::from(&windir).join("Fonts").join(file)) {
                 fonts
-                    .families
-                    .entry(egui::FontFamily::Proportional)
-                    .or_default()
-                    .insert(0, "Segoe UI".into());
-                cc.egui_ctx.set_fonts(fonts);
+                    .font_data
+                    .insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
             }
         }
+        if fonts.font_data.contains_key("Segoe UI") {
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "Segoe UI".into());
+        }
+        let semibold = if fonts.font_data.contains_key("Segoe Semibold") {
+            vec!["Segoe Semibold".into()]
+        } else {
+            fonts.families[&egui::FontFamily::Proportional].clone()
+        };
+        fonts
+            .families
+            .insert(egui::FontFamily::Name("UI Semibold".into()), semibold);
+        cc.egui_ctx.set_fonts(fonts);
         let dark_mode = if std::env::args().any(|a| a == "--demo-dark") {
             true
+        } else if std::env::args().any(|a| a == "--demo-light") {
+            false
         } else {
             read_dark_preference()
         };
         apply_theme(&cc.egui_ctx, dark_mode);
 
+        let illustration =
+            image::load_from_memory(include_bytes!("../../assets/connect-illustration.png"))
+                .expect("Bundled illustration")
+                .to_rgba8();
+        let mut dark_art = illustration.clone();
+        for pixel in dark_art.pixels_mut() {
+            if pixel[0] > 50 {
+                pixel[0] = 205;
+                pixel[1] = 217;
+                pixel[2] = 236;
+            }
+        }
+        let illustration_dark = cc.egui_ctx.load_texture(
+            "connect-dark",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [dark_art.width() as usize, dark_art.height() as usize],
+                dark_art.as_raw(),
+            ),
+            egui::TextureOptions::LINEAR,
+        );
+        let illustration = cc.egui_ctx.load_texture(
+            "connect-illustration",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [
+                    illustration.width() as usize,
+                    illustration.height() as usize,
+                ],
+                illustration.as_raw(),
+            ),
+            egui::TextureOptions::LINEAR,
+        );
+        let approved_logo = image::load_from_memory(include_bytes!(
+            "../../design/mockups/itool-logo-concept.png"
+        ))
+        .expect("Approved logo")
+        .crop_imm(200, 170, 910, 870)
+        .to_rgba8();
+        let logo = cc.egui_ctx.load_texture(
+            "approved-logo",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [
+                    approved_logo.width() as usize,
+                    approved_logo.height() as usize,
+                ],
+                approved_logo.as_raw(),
+            ),
+            egui::TextureOptions::LINEAR,
+        );
         let mut app = Self {
+            logo,
+            illustration,
+            illustration_dark,
+            screen: Screen::Connect,
+            settings_open: false,
+            connection_help: false,
+            folder_name: chrono::Local::now()
+                .format("iPhone photos %Y-%m-%d")
+                .to_string(),
+            options: ExportOptions::default(),
+            outcome: None,
+            metadata: BTreeMap::new(),
+            metadata_status: String::new(),
+            albums_available: false,
+            favorites_available: false,
+            album_filter: None,
+            favorites_only: false,
             jobs,
             events,
             cancel,
@@ -559,13 +670,12 @@ impl Desktop {
             search: String::new(),
             media_filter: MediaFilter::All,
             sort_order: SortOrder::NewestFirst,
-            group_by: GroupBy::Month,
+            group_by: GroupBy::Continuous,
             selected_month: None,
             show_sidebar: true,
             selected_only: false,
-            tile_size: 168.0,
-            export_layout: ExportLayout::Day,
-            review_open: false,
+            tile_size: 156.0,
+            export_layout: ExportLayout::Month,
             export_folder: None,
             selection_anchor: None,
             demo: std::env::args().any(|a| a == "--demo"),
@@ -597,55 +707,110 @@ impl Desktop {
         // Explicitly synthetic, device-free fixture for UI checks. Never export these paths.
         self.status =
             "DEMO · Sample media only. Device scanning and transfers are disabled.".into();
-        for index in 0..24 {
-            let day = if index < 14 {
-                "2026-10-23"
+        let atlas = image::load_from_memory(include_bytes!("../../assets/demo-atlas.png"))
+            .expect("Bundled synthetic sample photographs");
+        let names = [
+            "IMG_1023.JPG",
+            "IMG_1042.JPG",
+            "IMG_0871.JPG",
+            "IMG_1201.MOV",
+            "IMG_0996.JPG",
+            "IMG_0764.JPG",
+            "IMG_1188.JPG",
+            "IMG_0921.JPG",
+        ];
+        let days = [
+            "2026-10-14",
+            "2026-10-14",
+            "2026-10-13",
+            "2026-10-12",
+            "2026-09-28",
+            "2026-09-26",
+            "2026-09-22",
+            "2026-09-20",
+        ];
+        for index in 0..8 {
+            let day = days[index];
+            let kind = if index == 3 {
+                "Video"
+            } else if index == 6 {
+                "Photo + MOV"
             } else {
-                "2026-10-22"
+                "Photo"
             };
-            let kind = match index % 4 {
-                0 => "Video",
-                1 => "Photo + MOV",
-                _ => "Photo",
-            };
-            let ext = if kind == "Video" { "MOV" } else { "HEIC" };
-            let name = format!("IMG_{:04}.{ext}", 1040 + index);
+            let name = names[index].to_owned();
             let path = format!("/DCIM/100APPLE/{name}");
             let mut resources = vec![path.clone()];
             if kind == "Photo + MOV" {
-                resources.push(path.replace(".HEIC", ".MOV"));
+                resources.push(path.replace(".JPG", ".MOV"));
             }
-            let image = egui::ColorImage::filled(
-                [160, 120],
-                Color32::from_rgb(95 + (index * 5) as u8, 125, 140),
+            let cell = atlas
+                .crop_imm(
+                    (index as u32 % 4) * atlas.width() / 4,
+                    (index as u32 / 4) * atlas.height() / 2,
+                    atlas.width() / 4,
+                    atlas.height() / 2,
+                )
+                .to_rgba8();
+            self.add_texture(
+                ctx,
+                path.clone(),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [cell.width() as usize, cell.height() as usize],
+                    cell.as_raw(),
+                ),
             );
-            self.add_texture(ctx, path.clone(), image);
-            if index < 5 {
+            if [0, 2, 5, 6].contains(&index) {
                 self.selected.insert(path.clone());
             }
+            let date = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").expect("Sample date");
             self.items.push(MediaItem {
                 path,
                 name,
                 resources,
                 kind,
-                size: if kind == "Video" {
-                    420_000_000
+                size: if index == 6 {
+                    430_790_272
+                } else if index == 3 {
+                    72_000_000
                 } else {
                     6_000_000
                 },
-                timestamp: 1792713600 - index * 3600,
+                timestamp: date
+                    .and_hms_opt(if index == 1 { 3 } else { 12 }, 0, 0)
+                    .expect("Sample time")
+                    .and_utc()
+                    .timestamp(),
                 date_str: day.into(),
-                month_key: "2026-10".into(),
-                month_label: "October 2026".into(),
-                week_label: "Week 43, 2026".into(),
-                date_label: day.into(),
+                month_key: date.format("%Y-%m").to_string(),
+                month_label: date.format("%B %Y").to_string(),
+                week_label: date.format("Week %U, %Y").to_string(),
+                date_label: date.format("%b %e, %Y").to_string(),
             });
         }
-        self.group_by = GroupBy::Date;
+        self.screen = Screen::Library;
+        self.group_by = GroupBy::Continuous;
+        self.folder_name = "October memories".into();
         self.update_months_index();
         if std::env::args().any(|a| a == "--demo-review") {
-            self.review_open = true;
+            self.screen = Screen::Export;
             self.export_folder = Some(PathBuf::from(&self.destination).join("ITool-demo"));
+        }
+        if std::env::args().any(|a| a == "--demo-connect") {
+            self.screen = Screen::Connect;
+        }
+        if std::env::args().any(|a| a == "--demo-results") {
+            self.screen = Screen::Results;
+            self.outcome = Some(ExportOutcome {
+                folder: PathBuf::from(&self.destination).join("Sample export"),
+                copied: 6,
+                skipped: 2,
+                converted: 1,
+                copied_bytes: 428_000_000,
+                elapsed_seconds: 24.0,
+                warnings: vec![],
+            });
+            self.status = "Sample export complete · no files were copied".into();
         }
         self.list_view = std::env::args().any(|a| a == "--demo-list");
     }
@@ -654,6 +819,13 @@ impl Desktop {
         if self.demo {
             return;
         }
+        self.screen = Screen::Connect;
+        self.metadata.clear();
+        self.metadata_status.clear();
+        self.albums_available = false;
+        self.favorites_available = false;
+        self.album_filter = None;
+        self.favorites_only = false;
         self.items.clear();
         self.selected_only = false;
         self.selection_anchor = None;
@@ -813,7 +985,17 @@ impl Desktop {
         if self.selected_only {
             items.retain(|i| self.selected.contains(&i.path));
         }
+        items.retain(|i| self.matches_collection(i));
         items
+    }
+
+    fn matches_collection(&self, item: &MediaItem) -> bool {
+        let metadata = self.metadata.get(&item.path);
+        (!self.favorites_only || metadata.is_some_and(|m| m.favorite == Some(true)))
+            && self
+                .album_filter
+                .as_ref()
+                .is_none_or(|album| metadata.is_some_and(|m| m.albums.contains(album)))
     }
 
     fn export_plan(&self) -> Vec<ExportEntry> {
@@ -838,25 +1020,33 @@ impl Desktop {
             self.error = Some(e.to_string());
             return;
         }
-        let Some(dest) = self.export_folder.clone() else {
-            return;
+        let dest = match itool::workflow::named_destination(&self.destination, &self.folder_name) {
+            Ok(path) => path,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
         };
-        let parent = dest.parent().unwrap_or(std::path::Path::new(""));
-        if !parent.is_dir() {
-            self.error = Some("Choose an existing destination folder first.".into());
+        if self.demo {
             return;
         }
+        self.export_folder = Some(dest.clone());
         self.cancel.store(false, Ordering::Relaxed);
         self.busy = true;
         self.error = None;
         self.report = None;
+        self.outcome = None;
         self.done = 0;
         self.total = 0;
         self.current_file_progress.clear();
         self.started = Some(Instant::now());
-        self.review_open = false;
-        self.status = "Preparing original media files for export…".into();
-        if self.jobs.send(Job::Export(dest, entries)).is_err() {
+        self.screen = Screen::Results;
+        self.status = "Preparing original files…".into();
+        if self
+            .jobs
+            .send(Job::Export(dest, entries, self.options.clone()))
+            .is_err()
+        {
             self.busy = false;
             self.error = Some("Transfer worker stopped. Restart ITool and retry.".into());
         }
@@ -865,1183 +1055,7 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        let p = Palette::new(self.dark_mode);
-
-        // Process incoming background worker events
-        while let Ok(event) = self.events.try_recv() {
-            match event {
-                Event::Status(s) => self.status = s,
-                Event::PreviewReset => self
-                    .thumbnail_status
-                    .retain(|_, status| *status != ThumbnailStatus::Loading),
-                Event::Scanned(items) => {
-                    self.status = format!("{} media items ready on iPhone", items.len());
-                    self.items = items;
-                    self.busy = false;
-                    self.scanning = false;
-                    self.update_months_index();
-                }
-                Event::Preview(path, Some(image)) => {
-                    self.add_texture(&ctx, path, image);
-                }
-                Event::Preview(path, None) => {
-                    self.thumbnail_status.insert(path, ThumbnailStatus::Failed);
-                }
-                Event::Progress(done, total, file_info) => {
-                    self.done = done;
-                    self.total = total;
-                    self.current_file_progress = file_info;
-                    self.status = "Exporting media files…".into();
-                }
-                Event::Finished(report) => {
-                    self.busy = false;
-                    self.started = None;
-                    self.status = "Export complete. All files passed SHA-256 verification.".into();
-                    self.current_file_progress.clear();
-                    self.report = Some(report);
-                }
-                Event::Error(e) => {
-                    self.busy = false;
-                    self.scanning = false;
-                    self.started = None;
-                    self.error = Some(e);
-                    self.status = "Operation stopped. Any completed files are preserved.".into();
-                }
-            }
-        }
-
-        // ================= TOP HEADER PANEL =================
-        if !self.busy && !ctx.egui_wants_keyboard_input() && !self.review_open {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::A)) {
-                let paths: Vec<_> = self
-                    .filtered_items()
-                    .iter()
-                    .map(|i| i.path.clone())
-                    .collect();
-                self.selected.extend(paths);
-            }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                self.selected.clear();
-                self.selected_only = false;
-            }
-        }
-        egui::Panel::top("header_panel")
-            .frame(
-                egui::Frame::new()
-                    .fill(p.panel)
-                    .inner_margin(Margin::symmetric(20, 8))
-                    .stroke(Stroke::new(1.0, p.border)),
-            )
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("ITool").size(24.0).strong().color(p.text));
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("iPhone media workspace").size(13.0).strong());
-                        let status = if self.demo {
-                            "Demo library · transfers disabled"
-                        } else if self.scanning {
-                            "Scanning your iPhone…"
-                        } else if self.items.is_empty() {
-                            "Connect by USB, unlock, then scan"
-                        } else {
-                            "Library scanned · keep iPhone connected"
-                        };
-                        ui.label(RichText::new(status).size(12.0).color(if self.demo {
-                            p.warning
-                        } else {
-                            p.muted
-                        }));
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(secondary(if self.dark_mode {
-                                "Light mode"
-                            } else {
-                                "Dark mode"
-                            }))
-                            .clicked()
-                        {
-                            self.dark_mode = !self.dark_mode;
-                            apply_theme(&ctx, self.dark_mode);
-                            if let Err(e) = save_dark_preference(self.dark_mode) {
-                                self.status =
-                                    format!("Theme changed; preference could not be saved: {e}");
-                            }
-                        }
-
-                        if ui
-                            .add_enabled(
-                                !self.busy && !self.demo,
-                                secondary(if self.scanning {
-                                    "Scanning…"
-                                } else if self.items.is_empty() {
-                                    "Scan iPhone"
-                                } else {
-                                    "Rescan iPhone"
-                                }),
-                            )
-                            .clicked()
-                        {
-                            self.scan();
-                        }
-                        if !self.items.is_empty()
-                            && ui
-                                .add(secondary(if self.show_sidebar {
-                                    "Hide sidebar"
-                                } else {
-                                    "Show sidebar"
-                                }))
-                                .clicked()
-                        {
-                            self.show_sidebar = !self.show_sidebar;
-                        }
-                    });
-                });
-                ui.add_space(6.0);
-                let step = if self.review_open {
-                    2
-                } else if self.busy && !self.scanning || self.report.is_some() {
-                    3
-                } else if !self.selected.is_empty() {
-                    2
-                } else if !self.items.is_empty() {
-                    1
-                } else {
-                    0
-                };
-                ui.horizontal_wrapped(|ui| {
-                    for (index, label) in [
-                        "Connect & scan",
-                        "Choose media",
-                        "Review export",
-                        "Transfer & verify",
-                    ]
-                    .iter()
-                    .enumerate()
-                    {
-                        let current = step == index;
-                        egui::Frame::new()
-                            .fill(if current {
-                                p.tint
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .corner_radius(5)
-                            .inner_margin(Margin::symmetric(8, 4))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(format!("{}  {label}", index + 1))
-                                        .size(12.0)
-                                        .color(if current { p.accent } else { p.muted }),
-                                );
-                            });
-                        if index < 3 {
-                            ui.label(RichText::new("/").color(p.muted));
-                        }
-                    }
-                });
-                if !self.items.is_empty() {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        let edit = egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("Search files, dates or folders")
-                            .desired_width(206.0)
-                            .margin(Vec2::new(10.0, 7.0));
-                        if ui.add(edit).changed() {
-                            let _ = self.jobs.send(Job::CancelPreviews);
-                        }
-                        if !self.search.is_empty() && ui.add(secondary("Clear search")).clicked() {
-                            self.search.clear();
-                        }
-                        let photos = self.items.iter().filter(|i| i.kind != "Video").count();
-                        let videos = self.items.iter().filter(|i| i.kind == "Video").count();
-                        let live = self
-                            .items
-                            .iter()
-                            .filter(|i| i.kind == "Photo + MOV")
-                            .count();
-                        for (filter, label) in [
-                            (MediaFilter::All, format!("All  {}", self.items.len())),
-                            (MediaFilter::Photos, format!("Photos  {photos}")),
-                            (MediaFilter::Videos, format!("Videos  {videos}")),
-                            (MediaFilter::LivePhotos, format!("Live Photos  {live}")),
-                        ] {
-                            if ui
-                                .add(toggle(label, self.media_filter == filter, self.dark_mode))
-                                .clicked()
-                            {
-                                self.media_filter = filter;
-                                let _ = self.jobs.send(Job::CancelPreviews);
-                            }
-                        }
-                        if ui
-                            .add(secondary("Latest day"))
-                            .on_hover_text("Filter to the newest device file date in this scan")
-                            .clicked()
-                            && let Some(item) = self.items.iter().max_by_key(|i| i.timestamp)
-                        {
-                            self.search = item.date_str.clone();
-                            self.selected_month = None;
-                            self.selected_only = false;
-                        }
-                    });
-                    ui.add_space(4.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("View").size(12.0).color(p.muted));
-                        if ui
-                            .add(toggle("Grid", !self.list_view, self.dark_mode))
-                            .clicked()
-                        {
-                            self.list_view = false;
-                        }
-                        if ui
-                            .add(toggle("Details", self.list_view, self.dark_mode))
-                            .clicked()
-                        {
-                            self.list_view = true;
-                        }
-                        ui.add_space(8.0);
-                        egui::ComboBox::from_id_salt("group_mode")
-                            .width(155.0)
-                            .selected_text(format!(
-                                "Group: {}",
-                                match self.group_by {
-                                    GroupBy::Month => "Month",
-                                    GroupBy::Week => "Week",
-                                    GroupBy::Date => "Day",
-                                    GroupBy::Continuous => "None",
-                                    GroupBy::MediaType => "Media type",
-                                    GroupBy::SourceFolder => "Source folder",
-                                }
-                            ))
-                            .show_ui(ui, |ui| {
-                                for (value, label) in [
-                                    (GroupBy::Month, "Month"),
-                                    (GroupBy::Week, "Week"),
-                                    (GroupBy::Date, "Day"),
-                                    (GroupBy::MediaType, "Media type"),
-                                    (GroupBy::SourceFolder, "Source folder"),
-                                    (GroupBy::Continuous, "No grouping"),
-                                ] {
-                                    ui.selectable_value(&mut self.group_by, value, label);
-                                }
-                            });
-                        egui::ComboBox::from_id_salt("sort_order")
-                            .width(165.0)
-                            .selected_text(format!(
-                                "Order: {}",
-                                match self.sort_order {
-                                    SortOrder::NewestFirst => "Newest first",
-                                    SortOrder::OldestFirst => "Oldest first",
-                                    SortOrder::LargestFirst => "Largest first",
-                                    SortOrder::SmallestFirst => "Smallest first",
-                                    SortOrder::NameAscending => "Name A–Z",
-                                    SortOrder::NameDescending => "Name Z–A",
-                                }
-                            ))
-                            .show_ui(ui, |ui| {
-                                for (value, label) in [
-                                    (SortOrder::NewestFirst, "Newest first"),
-                                    (SortOrder::OldestFirst, "Oldest first"),
-                                    (SortOrder::LargestFirst, "Largest first"),
-                                    (SortOrder::SmallestFirst, "Smallest first"),
-                                    (SortOrder::NameAscending, "Name A–Z"),
-                                    (SortOrder::NameDescending, "Name Z–A"),
-                                ] {
-                                    ui.selectable_value(&mut self.sort_order, value, label);
-                                }
-                            });
-                        if !self.list_view {
-                            ui.label(RichText::new("Thumbnail size").size(12.0).color(p.muted));
-                            ui.spacing_mut().slider_width = 70.0;
-                            ui.add(
-                                egui::Slider::new(&mut self.tile_size, 128.0..=256.0)
-                                    .show_value(false),
-                            );
-                        }
-                    });
-                    if let Some(month) = self.selected_month.clone() {
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!("Month filter: {month}"))
-                                    .size(12.0)
-                                    .color(p.accent),
-                            );
-                            if ui.small_button("Remove filter").clicked() {
-                                self.selected_month = None;
-                            }
-                        });
-                    }
-                }
-            });
-
-        // ================= BOTTOM EXPORT DOCK =================
-        egui::Panel::bottom("transfer_panel")
-            .frame(
-                egui::Frame::new()
-                    .fill(p.panel)
-                    .inner_margin(Margin::symmetric(20, 12))
-                    .stroke(Stroke::new(1.0, p.border)),
-            )
-            .show(ui, |ui| {
-                // Row 1: Destination folder picker
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Export to").size(13.0).strong().color(p.text));
-                    let max_width = (ui.available_width() - 155.0).max(100.0);
-                    ui.add_enabled(
-                        !self.busy,
-                        egui::TextEdit::singleline(&mut self.destination)
-                            .desired_width(max_width)
-                            .margin(Vec2::new(10.0, 7.0)),
-                    );
-                    if ui
-                        .add_enabled(!self.busy, secondary("Choose folder…"))
-                        .clicked()
-                        && let Some(p) = rfd::FileDialog::new().pick_folder()
-                    {
-                        self.destination = p.display().to_string();
-                    }
-                });
-
-                ui.add_space(8.0);
-
-                // Row 2: Export primary action and metrics
-                ui.horizontal_wrapped(|ui| {
-                    let selected_count = self.selected.len();
-                    let selected_bytes: u64 = self
-                        .items
-                        .iter()
-                        .filter(|i| self.selected.contains(&i.path))
-                        .map(|i| i.size)
-                        .sum();
-
-                    let can_export =
-                        !self.busy && selected_count > 0 && !self.destination.trim().is_empty();
-
-                    let export_text = if selected_count > 0 {
-                        format!(
-                            "Review {} item{} ({})",
-                            selected_count,
-                            if selected_count == 1 { "" } else { "s" },
-                            format_size(selected_bytes)
-                        )
-                    } else {
-                        "Select photos or videos to export".to_string()
-                    };
-
-                    let export_btn = egui::Button::new(
-                        RichText::new(export_text)
-                            .size(14.0)
-                            .color(Color32::WHITE)
-                            .strong(),
-                    )
-                    .fill(if can_export { GREEN } else { p.muted })
-                    .min_size(Vec2::new(220.0, 36.0))
-                    .corner_radius(CornerRadius::same(6));
-
-                    if ui.add_enabled(can_export, export_btn).clicked() {
-                        let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S-%3f");
-                        self.export_folder = Some(
-                            PathBuf::from(self.destination.trim()).join(format!("ITool-{stamp}")),
-                        );
-                        self.review_open = true;
-                    }
-
-                    // Cancel button during active export
-                    if self.busy && !self.scanning {
-                        ui.add_space(8.0);
-                        let cancel_btn = egui::Button::new(
-                            RichText::new("Cancel Export")
-                                .size(13.0)
-                                .color(p.danger)
-                                .strong(),
-                        )
-                        .corner_radius(CornerRadius::same(6));
-
-                        if ui.add(cancel_btn).clicked() {
-                            self.cancel.store(true, Ordering::Relaxed);
-                            self.status = "Cancelling… Completed files are preserved.".into();
-                        }
-                    }
-
-                    ui.add_space(14.0);
-
-                    // Integrity guarantee note
-                    ui.label(
-                        RichText::new("Originals + Live Photo pairs · Phone unchanged")
-                            .size(11.5)
-                            .color(p.muted),
-                    );
-                });
-
-                // Active transfer progress bar & metrics
-                if self.busy && !self.scanning {
-                    ui.add_space(8.0);
-                    let ratio = if self.total > 0 {
-                        (self.done as f32 / self.total as f32).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    ui.add(egui::ProgressBar::new(ratio).show_percentage());
-
-                    ui.horizontal(|ui| {
-                        if !self.current_file_progress.is_empty() {
-                            ui.label(
-                                RichText::new(format!("Copying: {}", self.current_file_progress))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(p.text),
-                            );
-                        }
-
-                        if let Some(start) = self.started {
-                            let elapsed = start.elapsed().as_secs_f64();
-                            let speed = (self.done as f64 / 1_048_576.0) / elapsed.max(0.001);
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new(format!(
-                                    "· {} / {} ({:.2} MiB/s)",
-                                    format_size(self.done),
-                                    format_size(self.total),
-                                    speed
-                                ))
-                                .size(12.0)
-                                .color(p.muted),
-                            );
-                        }
-                    });
-                }
-
-                // Status & Notifications
-                ui.add_space(4.0);
-                ui.label(RichText::new(&self.status).size(12.0).color(p.text));
-
-                if let Some(ref e) = self.error {
-                    ui.add_space(2.0);
-                    ui.colored_label(p.danger, format!("Error: {e}"));
-                    if let Some(folder) = &self.export_folder
-                        && folder.is_dir()
-                        && ui.button("Open incomplete export").clicked()
-                    {
-                        let _ = std::process::Command::new("explorer.exe")
-                            .arg(folder)
-                            .spawn();
-                    }
-                }
-
-                if let Some(ref report) = self.report {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("✓ Saved into: {}", report.display()))
-                                .strong()
-                                .size(12.5)
-                                .color(p.accent),
-                        );
-                        if ui
-                            .button(
-                                RichText::new("Open folder in Windows Explorer")
-                                    .size(12.0)
-                                    .color(p.accent),
-                            )
-                            .clicked()
-                        {
-                            let _ = std::process::Command::new("explorer.exe")
-                                .arg(report.as_os_str())
-                                .spawn();
-                        }
-                    });
-                }
-            });
-
-        // ================= MONTH OVERVIEW SIDEBAR =================
-        if self.show_sidebar && !self.items.is_empty() {
-            egui::Panel::left("month_overview_sidebar")
-                .frame(
-                    egui::Frame::new()
-                        .fill(p.sidebar)
-                        .inner_margin(Margin::symmetric(12, 14))
-                        .stroke(Stroke::new(1.0, p.border)),
-                )
-                .min_size(230.0)
-                .max_size(280.0)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("Months Overview")
-                                .size(14.5)
-                                .strong()
-                                .color(p.text),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let total_bytes: u64 = self.items.iter().map(|i| i.size).sum();
-                            ui.label(
-                                RichText::new(format_size(total_bytes))
-                                    .size(11.0)
-                                    .color(p.muted),
-                            );
-                        });
-                    });
-                    ui.label(
-                        RichText::new(format!("{} items total", self.items.len()))
-                            .size(11.5)
-                            .color(p.muted),
-                    );
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            // "All Media" top row
-                            let all_active = self.selected_month.is_none();
-                            let (all_rect, all_resp) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), 32.0),
-                                egui::Sense::click(),
-                            );
-                            if all_resp.clicked() {
-                                self.selected_month = None;
-                                let _ = self.jobs.send(Job::CancelPreviews);
-                            }
-
-                            let bg_color = if all_active {
-                                GREEN
-                            } else if all_resp.hovered() {
-                                p.canvas
-                            } else {
-                                Color32::TRANSPARENT
-                            };
-                            ui.painter()
-                                .rect_filled(all_rect, CornerRadius::same(6), bg_color);
-
-                            let text_color = if all_active { Color32::WHITE } else { p.text };
-                            let sub_color = if all_active {
-                                Color32::from_rgb(220, 252, 231)
-                            } else {
-                                p.muted
-                            };
-
-                            ui.painter().text(
-                                all_rect.left_center() + Vec2::new(10.0, 0.0),
-                                egui::Align2::LEFT_CENTER,
-                                "All Media",
-                                egui::FontId::proportional(13.0),
-                                text_color,
-                            );
-                            ui.painter().text(
-                                all_rect.right_center() + Vec2::new(-10.0, 0.0),
-                                egui::Align2::RIGHT_CENTER,
-                                format!("{}", self.items.len()),
-                                egui::FontId::proportional(11.5),
-                                sub_color,
-                            );
-
-                            ui.add_space(4.0);
-
-                            // Individual Month rows
-                            for month in &self.months {
-                                let is_active =
-                                    self.selected_month.as_deref() == Some(&month.label);
-                                let (row_rect, row_resp) = ui.allocate_exact_size(
-                                    Vec2::new(ui.available_width(), 30.0),
-                                    egui::Sense::click(),
-                                );
-
-                                if row_resp.clicked() {
-                                    if is_active {
-                                        self.selected_month = None;
-                                    } else {
-                                        self.selected_month = Some(month.label.clone());
-                                    }
-                                    let _ = self.jobs.send(Job::CancelPreviews);
-                                }
-
-                                let bg = if is_active {
-                                    GREEN
-                                } else if row_resp.hovered() {
-                                    p.canvas
-                                } else {
-                                    Color32::TRANSPARENT
-                                };
-                                ui.painter()
-                                    .rect_filled(row_rect, CornerRadius::same(6), bg);
-
-                                let label_col = if is_active { Color32::WHITE } else { p.text };
-                                let meta_col = if is_active {
-                                    Color32::from_rgb(220, 252, 231)
-                                } else {
-                                    p.muted
-                                };
-
-                                ui.painter().text(
-                                    row_rect.left_center() + Vec2::new(10.0, 0.0),
-                                    egui::Align2::LEFT_CENTER,
-                                    &month.label,
-                                    egui::FontId::proportional(12.5),
-                                    label_col,
-                                );
-
-                                let meta_str =
-                                    format!("{} · {}", month.count, format_size(month.bytes));
-                                ui.painter().text(
-                                    row_rect.right_center() + Vec2::new(-10.0, 0.0),
-                                    egui::Align2::RIGHT_CENTER,
-                                    &meta_str,
-                                    egui::FontId::proportional(11.0),
-                                    meta_col,
-                                );
-
-                                ui.add_space(2.0);
-                            }
-                        });
-                });
-        }
-
-        // ================= MAIN MEDIA AREA =================
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(p.canvas))
-            .show(ui, |ui| {
-                // If no items loaded, show welcome empty state
-                if self.items.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(100.0);
-                        let icon_rect = ui
-                            .allocate_exact_size(Vec2::new(64.0, 64.0), egui::Sense::hover())
-                            .0;
-                        ui.painter().circle_filled(
-                            icon_rect.center(),
-                            32.0,
-                            p.tint,
-                        );
-                        ui.painter().text(
-                            icon_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "USB",
-                            egui::FontId::proportional(32.0),
-                            Color32::WHITE,
-                        );
-
-                        ui.add_space(16.0);
-                        ui.heading(
-                            RichText::new(if self.scanning {
-                                "Cataloging your iPhone media…"
-                            } else {
-                                "Ready to export your iPhone media"
-                            })
-                            .size(22.0)
-                            .strong()
-                            .color(p.text),
-                        );
-                        ui.add_space(6.0);
-                        ui.label(
-                            RichText::new("Connect by USB, unlock your phone, and tap 'Trust' if asked.")
-                                .size(13.5)
-                                .color(p.muted),
-                        );
-                        ui.label(
-                            RichText::new("Click 'Scan iPhone' to view your photos and videos without modifying the phone.")
-                                .size(13.5)
-                                .color(p.muted),
-                        );
-                        ui.add_space(22.0);
-
-                        if self.scanning {
-                            ui.spinner();
-                            ui.add_space(8.0);
-                            ui.label(RichText::new(&self.status).size(13.0).color(p.text));
-                        } else {
-                            let scan_btn = egui::Button::new(
-                                RichText::new("Scan iPhone Now")
-                                    .size(15.0)
-                                    .color(Color32::WHITE)
-                                    .strong(),
-                            )
-                            .fill(GREEN)
-                            .min_size(Vec2::new(180.0, 42.0))
-                            .corner_radius(CornerRadius::same(8));
-
-                            if ui.add_enabled(!self.busy, scan_btn).clicked() {
-                                self.scan();
-                            }
-                        }
-                    });
-                    return;
-                }
-
-                ui.add_space(10.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.add_space(8.0);
-                    let shown = self.filtered_items();
-                    let visible = shown.len();
-                    let all_selected = !shown.is_empty() && shown.iter().all(|i| self.selected.contains(&i.path));
-                    ui.label(RichText::new(format!("{visible} items")).strong().size(14.0))
-                        .on_hover_text("Click to select · Shift-click a range · Drag across the grid · Ctrl+A selects shown items");
-                    ui.label(RichText::new(format!("{} selected",self.selected.len())).size(13.0).color(p.accent));
-                    ui.add_space(8.0);
-                    if ui.add_enabled(!self.busy && visible > 0,secondary(if all_selected { "Deselect shown" } else { "Select shown" })).clicked() {
-                        let paths: Vec<_> = self.filtered_items().iter().map(|i| i.path.clone()).collect();
-                        for p in paths { if all_selected { self.selected.remove(&p); } else { self.selected.insert(p); } }
-                    }
-                    if ui.add_enabled(!self.busy && visible > 0,secondary("Invert shown")).clicked() {
-                        let paths: Vec<_> = self.filtered_items().iter().map(|i| i.path.clone()).collect();
-                        for p in paths { if !self.selected.remove(&p) { self.selected.insert(p); } }
-                    }
-                    let clear = egui::Button::new(RichText::new("Clear selection").size(13.0).color(p.danger))
-                        .fill(Color32::TRANSPARENT).stroke(Stroke::NONE).min_size(Vec2::new(0.0,30.0));
-                    if ui.add_enabled(!self.busy && !self.selected.is_empty(),clear).clicked() { self.selected.clear(); self.selected_only = false; }
-                    ui.checkbox(&mut self.selected_only,"Selected only");
-                });
-                ui.add_space(6.0);
-
-                let mut filtered = Self::get_filtered_items(
-                    &self.items,
-                    &self.search,
-                    self.media_filter,
-                    self.sort_order,
-                    self.selected_month.as_deref(),
-                );
-                if self.selected_only { filtered.retain(|i| self.selected.contains(&i.path)); }
-                let available_width = (ui.available_width() - 16.0).max(200.0);
-                let gap = 10.0;
-                let target_size = self.tile_size;
-                let columns = ((available_width + gap) / (target_size + gap))
-                    .floor()
-                    .max(1.0) as usize;
-                let card_width =
-                    ((available_width - gap * (columns as f32 - 1.0)) / columns as f32).floor();
-                let card_height = card_width.min((ui.available_height() - 64.0).max(120.0));
-
-                if filtered.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(80.0);
-                        ui.heading(
-                            RichText::new("No media matches the current filter")
-                                .size(18.0)
-                                .color(p.text),
-                        );
-                        ui.add_space(8.0);
-                        if ui.button("Clear search and filters").clicked() {
-                            self.search.clear();
-                            self.media_filter = MediaFilter::All;
-                            self.selected_month = None;
-                            self.selected_only = false;
-                        }
-                    });
-                    return;
-                }
-
-                if self.group_by != GroupBy::Continuous {
-                    filtered = grouped_items(&filtered, self.group_by).into_iter().flat_map(|(_,items)| items).collect();
-                }
-
-                // Map paths to global filtered indices for Shift-click range selection
-                let item_indices: HashMap<String, usize> = filtered
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, item)| (item.path.clone(), idx))
-                    .collect();
-
-                let gallery_rect = ui.max_rect();
-                let is_primary_down = ui.input(|i| i.pointer.primary_down());
-                let is_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
-                let press_origin = ui.input(|i| i.pointer.press_origin());
-                let latest_pos = ui.input(|i| i.pointer.latest_pos());
-                let is_shift = ui.input(|i| i.modifiers.shift);
-                let is_ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-
-                // Detect drag-to-select marquee
-                let mut active_marquee: Option<egui::Rect> = None;
-                if !self.list_view && is_dragging && is_primary_down {
-                    if let (Some(origin), Some(pos)) = (press_origin, latest_pos) {
-                        if gallery_rect.contains(origin) {
-                            if !self.drag_active {
-                                self.drag_active = true;
-                                self.drag_base_selected = if is_shift || is_ctrl {
-                                    self.selected.clone()
-                                } else {
-                                    HashSet::new()
-                                };
-                            }
-                            active_marquee = Some(egui::Rect::from_two_pos(origin, pos));
-                            ctx.request_repaint();
-
-                            // Auto-scroll when dragging near top or bottom edges
-                            if pos.y < gallery_rect.min.y + 45.0 {
-                                ui.scroll_with_delta(Vec2::new(0.0, 20.0));
-                            } else if pos.y > gallery_rect.max.y - 45.0 {
-                                ui.scroll_with_delta(Vec2::new(0.0, -20.0));
-                            }
-                        }
-                    }
-                } else if !is_primary_down && self.drag_active {
-                    self.drag_active = false;
-                    self.drag_base_selected.clear();
-                }
-
-                let mut intersected_in_drag: HashSet<String> = HashSet::new();
-                let mut card_click: Option<(usize, bool)> = None; // (index, is_shift)
-                let mut retry_preview: Option<String> = None;
-                let mut group_toggle: Option<(Vec<String>, bool)> = None; // (paths, select_all)
-                let mut needed_previews: Vec<String> = Vec::new();
-
-                let is_continuous = self.group_by == GroupBy::Continuous;
-
-                if self.list_view {
-                    egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui, |ui| {
-                        let groups = grouped_items(&filtered, self.group_by);
-                        for (title,items) in groups {
-                            if self.group_by != GroupBy::Continuous { ui.heading(title); }
-                            ui.horizontal(|ui| {
-                                ui.add_space(30.0);
-                                ui.add_sized([210.0,24.0],egui::Label::new(RichText::new("File").strong()));
-                                ui.add_sized([100.0,24.0],egui::Label::new("Device date"));
-                                ui.add_sized([85.0,24.0],egui::Label::new("Size"));
-                                ui.label("Type / resources");
-                            });
-                            let row_height = 32.0;
-                            for item in items {
-                                let rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(),row_height));
-                                if !ui.is_rect_visible(rect) { ui.allocate_space(rect.size()); continue; }
-                                ui.horizontal(|ui| {
-                                    let mut checked = self.selected.contains(&item.path);
-                                    if ui.add_enabled(!self.busy,egui::Checkbox::without_text(&mut checked)).clicked() {
-                                        card_click = Some((item_indices[&item.path],ui.input(|i| i.modifiers.shift)));
-                                    }
-                                    let label = egui::Label::new(RichText::new(safe_truncate(&item.name,27)).strong()).sense(egui::Sense::click());
-                                    if ui.add_sized([210.0,24.0],label).on_hover_text(&item.path).clicked() && !self.busy {
-                                        card_click = Some((item_indices[&item.path],ui.input(|i| i.modifiers.shift)));
-                                    }
-                                    ui.add_sized([100.0,24.0],egui::Label::new(&item.date_str));
-                                    ui.add_sized([85.0,24.0],egui::Label::new(format_size(item.size)));
-                                    ui.label(format!("{} · {} files",media_label(item),item.resources.len()));
-                                });
-                            }
-                            ui.add_space(12.0);
-                        }
-                    });
-                } else if is_continuous {
-                    // Continuous virtualized gallery
-                    let total_rows = filtered.len().div_ceil(columns);
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.add_space(8.0);
-                            for row_idx in 0..total_rows {
-                                let row_rect = egui::Rect::from_min_size(
-                                    ui.cursor().min,
-                                    Vec2::new(available_width, card_height + gap),
-                                );
-
-                                if ui.is_rect_visible(row_rect) {
-                                    let start = row_idx * columns;
-                                    let end = (start + columns).min(filtered.len());
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = gap;
-                                        for item in &filtered[start..end] {
-                                            let idx = item_indices[&item.path];
-                                            let status = self
-                                                .thumbnail_status
-                                                .get(&item.path)
-                                                .copied()
-                                                .unwrap_or(ThumbnailStatus::Loading);
-                                            let has_status =
-                                                self.thumbnail_status.contains_key(&item.path);
-
-                                            Self::render_media_card(
-                                                ui,
-                                                item,
-                                                idx,
-                                                card_width,
-                                                card_height,
-                                                self.selected.contains(&item.path),
-                                                self.textures.get(&item.path),
-                                                status,
-                                                active_marquee,
-                                                &mut intersected_in_drag,
-                                                &mut card_click,
-                                                &mut retry_preview,
-                                                self.busy,
-                                                self.drag_active,
-                                            );
-
-                                            if !has_status {
-                                                needed_previews.push(item.path.clone());
-                                            }
-                                        }
-                                    });
-                                    ui.add_space(gap);
-                                } else {
-                                    ui.allocate_space(Vec2::new(
-                                        available_width,
-                                        card_height + gap,
-                                    ));
-                                }
-                            }
-                            ui.add_space(16.0);
-                        });
-                } else {
-                    // Grouped virtualized gallery (Month, Week, or Date)
-                    let groups = grouped_items(&filtered, self.group_by);
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for (group_title, group_items) in &groups {
-                                ui.add_space(8.0);
-                                // Group Header
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(group_title)
-                                            .size(16.0)
-                                            .strong()
-                                            .color(p.text),
-                                    );
-                                    let group_bytes: u64 =
-                                        group_items.iter().map(|i| i.size).sum();
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "· {} item{} ({})",
-                                            group_items.len(),
-                                            if group_items.len() == 1 { "" } else { "s" },
-                                            format_size(group_bytes)
-                                        ))
-                                        .size(12.0)
-                                        .color(p.muted),
-                                    );
-
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            let all_selected = group_items
-                                                .iter()
-                                                .all(|i| self.selected.contains(&i.path));
-                                            let btn_text = if all_selected {
-                                                "Deselect group"
-                                            } else {
-                                                "Select group"
-                                            };
-                                            let btn = secondary(btn_text);
-
-                                            if ui.add_enabled(!self.busy, btn).clicked() {
-                                                let paths: Vec<String> = group_items
-                                                    .iter()
-                                                    .map(|i| i.path.clone())
-                                                    .collect();
-                                                group_toggle = Some((paths, !all_selected));
-                                            }
-                                        },
-                                    );
-                                });
-
-                                ui.add_space(4.0);
-                                ui.separator();
-                                ui.add_space(6.0);
-
-                                // Group Rows Virtualization
-                                let total_group_rows = group_items.len().div_ceil(columns);
-                                for row_idx in 0..total_group_rows {
-                                    let row_rect = egui::Rect::from_min_size(
-                                        ui.cursor().min,
-                                        Vec2::new(available_width, card_height + gap),
-                                    );
-
-                                    if ui.is_rect_visible(row_rect) {
-                                        let start = row_idx * columns;
-                                        let end = (start + columns).min(group_items.len());
-                                        ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing.x = gap;
-                                            for item in &group_items[start..end] {
-                                                let idx = item_indices[&item.path];
-                                                let status = self
-                                                    .thumbnail_status
-                                                    .get(&item.path)
-                                                    .copied()
-                                                    .unwrap_or(ThumbnailStatus::Loading);
-                                                let has_status =
-                                                    self.thumbnail_status.contains_key(&item.path);
-
-                                                Self::render_media_card(
-                                                    ui,
-                                                    item,
-                                                    idx,
-                                                    card_width,
-                                                    card_height,
-                                                    self.selected.contains(&item.path),
-                                                    self.textures.get(&item.path),
-                                                    status,
-                                                    active_marquee,
-                                                    &mut intersected_in_drag,
-                                                    &mut card_click,
-                                                    &mut retry_preview,
-                                                    self.busy,
-                                                    self.drag_active,
-                                                );
-
-                                                if !has_status {
-                                                    needed_previews.push(item.path.clone());
-                                                }
-                                            }
-                                        });
-                                        ui.add_space(gap);
-                                    } else {
-                                        ui.allocate_space(Vec2::new(
-                                            available_width,
-                                            card_height + gap,
-                                        ));
-                                    }
-                                }
-                                ui.add_space(14.0);
-                            }
-                        });
-                }
-
-                // If drag selection was active, update selection and paint selection box
-                if let Some(marquee) = active_marquee {
-                    let mut new_selection = self.drag_base_selected.clone();
-                    for p in &intersected_in_drag {
-                        new_selection.insert(p.clone());
-                    }
-                    self.selected = new_selection;
-
-                    // Paint green selection marquee rectangle overlay
-                    ui.painter().rect_filled(
-                        marquee,
-                        CornerRadius::same(3),
-                        Color32::from_rgba_premultiplied(22, 101, 52, 35),
-                    );
-                    ui.painter().rect_stroke(
-                        marquee,
-                        CornerRadius::same(3),
-                        Stroke::new(1.5, p.accent),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-
-                // Handle single-click and Shift-click range selection
-                if let Some((curr_idx, is_shift)) = card_click {
-                    let anchor = self.selection_anchor.as_ref().and_then(|p| item_indices.get(p)).copied();
-                    if let Some(prev_idx) = anchor.filter(|_| is_shift) {
-                        let start = prev_idx.min(curr_idx);
-                        let end = prev_idx.max(curr_idx);
-                        let paths_to_add: Vec<String> = filtered[start..=end].iter().map(|i| i.path.clone()).collect();
-                        for path in paths_to_add {
-                            self.selected.insert(path);
-                        }
-                    } else {
-                        let path = filtered[curr_idx].path.clone();
-                        self.selection_anchor = Some(path.clone());
-                        if self.selected.contains(&path) {
-                            self.selected.remove(&path);
-                        } else {
-                            self.selected.insert(path);
-                        }
-                    }
-                }
-
-                // Handle group select/deselect
-                if let Some((paths, do_select)) = group_toggle {
-                    for path in paths {
-                        if do_select {
-                            self.selected.insert(path);
-                        } else {
-                            self.selected.remove(&path);
-                        }
-                    }
-                }
-
-                // Handle thumbnail retry
-                if let Some(path) = retry_preview {
-                    self.thumbnail_status.remove(&path);
-                    self.request_preview_if_needed(&path);
-                }
-
-                // Request previews only for visible cards
-                for path in needed_previews {
-                    self.request_preview_if_needed(&path);
-                }
-            });
-
-        self.capture_frames += 1;
-        if let Ok(path) = std::env::var("ITOOL_UI_CAPTURE") {
-            if self.capture_frames == 8 {
-                let capture_ctx = ctx.clone();
-                ctx.request_screenshot(move |img| {
-                    let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-                    if let Err(e) = image::save_buffer(
-                        &path,
-                        &bytes,
-                        img.size[0] as u32,
-                        img.size[1] as u32,
-                        image::ColorType::Rgba8,
-                    ) {
-                        eprintln!("Screenshot failed: {e}");
-                    }
-                    capture_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                });
-            }
-            ctx.request_repaint();
-        }
-        if self.review_open {
-            let mut open = true;
-            egui::Window::new("Review export")
-                .open(&mut open).collapsible(false).resizable(true)
-                .default_width(640.0).max_height(480.0).anchor(egui::Align2::CENTER_CENTER,Vec2::ZERO)
-                .show(&ctx, |ui| {
-                    ui.heading("Ready for your edit");
-                    let count = self.selected.len();
-                    let bytes: u64 = self.items.iter().filter(|i| self.selected.contains(&i.path)).map(|i| i.size).sum();
-                    ui.label(format!("{count} selected items · {} · Live Photo stills and clips stay together", format_size(bytes)));
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Organize files:");
-                        egui::ComboBox::from_id_salt("export_layout").selected_text(self.export_layout.label()).show_ui(ui, |ui| {
-                            for layout in [ExportLayout::Flat,ExportLayout::Day,ExportLayout::Month,ExportLayout::MediaType,ExportLayout::SourceFolder] {
-                                ui.selectable_value(&mut self.export_layout,layout,layout.label());
-                            }
-                        });
-                    });
-                    if let Some(folder) = &self.export_folder { ui.label(format!("New folder: {}", folder.display())); }
-                    ui.label("Folder dates use device file dates, not EXIF capture dates. Originals keep their names.");
-                    let plan = self.export_plan();
-                    ui.label(format!("{} original files · Copy order follows grouping and sorting", plan.len()));
-                    let shown_selected = self.filtered_items().iter().filter(|i| self.selected.contains(&i.path)).count();
-                    if shown_selected < count { ui.label(format!("Includes {} selected items hidden by current filters.",count - shown_selected)); }
-                    ui.separator();
-                    egui::ScrollArea::vertical().max_height(190.0).show_rows(ui, 20.0, plan.len(), |ui, range| {
-                        for entry in &plan[range] {
-                            let name = entry.source.rsplit('/').next().unwrap_or("");
-                            let relative = if entry.folder.is_empty() { name.into() } else { format!("{}/{name}",entry.folder) };
-                            ui.label(relative).on_hover_text(&entry.source);
-                        }
-                    });
-                    ui.separator();
-                    let validation = itool::validate_export_plan(&plan);
-                    let parent_exists = self.export_folder.as_ref().and_then(|p| p.parent()).is_some_and(|p| p.is_dir());
-                    if let Err(e) = &validation { ui.colored_label(p.danger,e.to_string()); }
-                    if !parent_exists { ui.colored_label(p.danger,"Choose an existing destination folder."); }
-                    ui.label("Each file is reread and checked against its transfer SHA-256. Existing exports are never overwritten.");
-                    ui.horizontal(|ui| {
-                        if ui.add(secondary("Back to selection")).clicked() { self.review_open = false; }
-                        if ui.add_enabled(!self.busy && !self.demo && validation.is_ok() && parent_exists,
-                            egui::Button::new(RichText::new("Start transfer").color(Color32::WHITE)).fill(GREEN))
-                            .clicked() { self.begin_export(); }
-                    });
-                });
-            if !open {
-                self.review_open = false;
-            }
-        }
-
-        if self.busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(60));
-        }
+        self.guided_ui(ui);
     }
 }
 
@@ -2065,7 +1079,9 @@ impl Desktop {
     ) {
         let p = Palette::new(ui.visuals().dark_mode);
         let tile_size = Vec2::new(card_width, card_height);
-        let (rect, response) = ui.allocate_exact_size(tile_size, egui::Sense::click_and_drag());
+        let (tile_rect, response) =
+            ui.allocate_exact_size(tile_size, egui::Sense::click_and_drag());
+        let rect = egui::Rect::from_min_max(tile_rect.min, tile_rect.max - Vec2::new(0.0, 40.0));
         let is_hovered = response.hovered();
         let is_clicked = response.clicked();
 
@@ -2120,7 +1136,7 @@ impl Desktop {
 
         // 1. Card Base Background & Stroke
         let bg_color = if is_selected {
-            Color32::from_rgba_premultiplied(22, 101, 52, 22)
+            Color32::from_rgba_premultiplied(66, 91, 220, 22)
         } else {
             p.panel
         };
@@ -2135,21 +1151,22 @@ impl Desktop {
                     let tex_h = tex.size()[1] as f32;
                     let aspect = (tex_w / tex_h.max(1.0)).clamp(0.25, 4.0);
 
-                    // Fit uniformly within the card while preserving original aspect ratio
-                    let (draw_w, draw_h) = if rect.width() / rect.height() > aspect {
-                        (rect.height() * aspect, rect.height())
+                    // Cover-crop only the gallery preview; exported original bytes stay unchanged.
+                    let tile_aspect = rect.width() / rect.height().max(1.);
+                    let uv = if aspect > tile_aspect {
+                        let width = tile_aspect / aspect;
+                        egui::Rect::from_min_max(
+                            egui::pos2((1. - width) * 0.5, 0.),
+                            egui::pos2((1. + width) * 0.5, 1.),
+                        )
                     } else {
-                        (rect.width(), rect.width() / aspect)
+                        let height = aspect / tile_aspect;
+                        egui::Rect::from_min_max(
+                            egui::pos2(0., (1. - height) * 0.5),
+                            egui::pos2(1., (1. + height) * 0.5),
+                        )
                     };
-                    let draw_rect =
-                        egui::Rect::from_center_size(rect.center(), Vec2::new(draw_w, draw_h));
-
-                    ui.painter().image(
-                        tex.id(),
-                        draw_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
+                    ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
                 }
             }
             ThumbnailStatus::Loading => {
@@ -2220,7 +1237,7 @@ impl Desktop {
                 "LIVE"
             };
             let badge_rect = egui::Rect::from_min_size(
-                rect.min + Vec2::new(8.0, 8.0),
+                rect.max - Vec2::new(if item.kind == "Video" { 66.0 } else { 62.0 }, 30.0),
                 Vec2::new(if item.kind == "Video" { 46.0 } else { 42.0 }, 18.0),
             );
             ui.painter().rect_filled(
@@ -2237,75 +1254,77 @@ impl Desktop {
             );
         }
 
-        // 5. Checkmark selection circle in top-right
-        let check_center = egui::pos2(rect.max.x - 16.0, rect.min.y + 16.0);
+        // Consistent square selection control, separate from the media-type badge.
+        let check = egui::Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::splat(21.0));
+        ui.painter().rect_filled(
+            check,
+            4,
+            if is_selected {
+                ACCENT
+            } else {
+                Color32::from_black_alpha(36)
+            },
+        );
+        ui.painter().rect_stroke(
+            check,
+            4,
+            Stroke::new(1.3, Color32::WHITE),
+            egui::StrokeKind::Inside,
+        );
         if is_selected {
-            ui.painter().circle_filled(check_center, 10.0, GREEN);
-            // Crisp white checkmark ✓
-            let p1 = check_center + Vec2::new(-3.5, 0.0);
-            let p2 = check_center + Vec2::new(-0.8, 3.2);
-            let p3 = check_center + Vec2::new(4.2, -3.5);
-            ui.painter()
-                .line_segment([p1, p2], Stroke::new(2.0, Color32::WHITE));
-            ui.painter()
-                .line_segment([p2, p3], Stroke::new(2.0, Color32::WHITE));
-        } else if is_hovered {
-            ui.painter().circle_filled(
-                check_center,
-                10.0,
-                Color32::from_rgba_premultiplied(0, 0, 0, 80),
+            let c = check.center();
+            ui.painter().line_segment(
+                [c + Vec2::new(-5., 0.), c + Vec2::new(-1., 4.)],
+                Stroke::new(1.8, Color32::WHITE),
             );
-            ui.painter()
-                .circle_stroke(check_center, 9.5, Stroke::new(1.5, Color32::WHITE));
+            ui.painter().line_segment(
+                [c + Vec2::new(-1., 4.), c + Vec2::new(6., -5.)],
+                Stroke::new(1.8, Color32::WHITE),
+            );
         }
 
-        // 6. Frosted bottom metadata overlay (Filename + Size)
-        let overlay_height = 42.0;
-        let overlay_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.min.x, rect.max.y - overlay_height),
-            Vec2::new(rect.width(), overlay_height),
-        );
-        ui.painter().rect_filled(
-            overlay_rect,
-            CornerRadius {
-                nw: 0,
-                ne: 0,
-                sw: 5,
-                se: 5,
-            },
-            Color32::from_rgba_premultiplied(0, 0, 0, 160),
-        );
-
-        let short_name = safe_truncate(&item.name, 13);
+        // Labels belong below the preview so originals remain unobscured.
+        let text_top = egui::pos2(tile_rect.min.x, rect.max.y + 7.0);
+        let characters = ((tile_rect.width() - 8.0) / 6.5).max(12.0) as usize;
         ui.painter().text(
-            overlay_rect.min + Vec2::new(6.0, 5.0),
+            text_top,
             egui::Align2::LEFT_TOP,
-            &short_name,
-            egui::FontId::proportional(10.5),
-            Color32::WHITE,
+            safe_truncate(&item.name, characters),
+            egui::FontId::proportional(12.0),
+            p.text,
         );
-
-        let size_str = format_size(item.size);
         ui.painter().text(
-            egui::pos2(overlay_rect.max.x - 6.0, overlay_rect.min.y + 24.0),
-            egui::Align2::RIGHT_TOP,
-            &size_str,
-            egui::FontId::proportional(9.5),
-            Color32::from_rgb(209, 213, 219),
+            text_top + Vec2::new(0.0, 20.0),
+            egui::Align2::LEFT_TOP,
+            chrono::DateTime::from_timestamp(item.timestamp, 0)
+                .map(|date| date.format("%b %e, %Y  %l:%M %p").to_string())
+                .unwrap_or_else(|| item.date_str.clone()),
+            egui::FontId::proportional(11.0),
+            p.muted,
         );
     }
 }
 
 fn main() -> eframe::Result {
+    let icon = image::load_from_memory(include_bytes!("../../assets/itool.png"))
+        .expect("Bundled app icon must decode")
+        .to_rgba8();
+    let icon = egui::IconData {
+        width: icon.width(),
+        height: icon.height(),
+        rgba: icon.into_raw(),
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(if std::env::var_os("ITOOL_UI_COMPACT").is_some() {
                 [900.0, 600.0]
             } else {
-                [1240.0, 860.0]
+                [940.0, 664.0]
             })
             .with_min_inner_size([900.0, 600.0])
-            .with_title("ITool — iPhone Original Media Exporter"),
+            .with_decorations(false)
+            .with_icon(Arc::new(icon))
+            .with_title("ITool — iPhone originals"),
         ..Default::default()
     };
     eframe::run_native(

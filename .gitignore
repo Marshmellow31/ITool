@@ -5,3 +5,5 @@
 /analysis/private/
 /exports/
 *.partial
+/dist/
+/.impeccable/

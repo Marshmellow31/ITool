@@ -1,181 +1,157 @@
-# ITool — iPhone Original Media Exporter
+# ITool
 
-An ultra-fast, 100% private, native Windows desktop application and CLI written in Rust for transferring original-quality photos, videos, and Live Photos from an iPhone to a Windows PC over USB.
+A native Windows app and CLI for copying accessible iPhone photos, videos and Live Photo resources over USB. Original files are copied without conversion. Optional compatible copies are additional files.
 
-[![GitHub Release](https://img.shields.io/github/v/release/Marshmellow31/ITool?color=166534&label=Release)](https://github.com/Marshmellow31/ITool/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-informational)](#requirements)
-[![Language](https://img.shields.io/badge/Language-Rust%202021-orange.svg)](https://www.rust-lang.org/)
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline%20%7C%20Zero%20Telemetry-success)](#why-itool-is-better-than-3utools--proprietary-chinese-apps)
+**Development build:** the guided UI and roadmap features below are implemented in source. Compilation is distinct from tests and physical-device results. This work does not publish a new GitHub release or replace the existing 0.2.0 release.
 
----
+## Screenshots
 
-## The Problem
+Actual screenshots of the Windows development build in demo mode. The library uses synthetic sample photos; export counts and rates are simulated. Select an image to view it at full size.
 
-Transferring photos and videos from an iPhone to a Windows PC has historically been a frustrating experience:
-- **Windows File Explorer (MTP)** freezes, crashes midway on large transfers, frequently fails with *"The device is unreachable"*, and splits Live Photos into confusing disconnected files.
-- **iCloud for Windows** compresses media, requires paid cloud storage, and is dependent on slow internet bandwidth.
-- **Proprietary Chinese Utilities (such as 3uTools, iTools, Tenorshare)** are bloated, closed-source suites that notoriously collect device telemetry, install background services, inject ads, and risk privacy.
+### 1. Connect
 
-**ITool** solves this by providing a clean, standalone, high-performance native Windows app that communicates directly over USB with bit-for-bit cryptographic integrity.
+Connect your iPhone, unlock it and confirm Trust before scanning.
 
----
+| Light mode | Dark mode |
+| --- | --- |
+| ![1. Connect in light mode](docs/screenshots/connect-light.png) | ![1. Connect in dark mode](docs/screenshots/connect-dark.png) |
 
-## Key Features
+### 2. Choose media
 
-### 📸 1. Bit-for-Bit Original Quality
-- Transfers exact camera-original **HEIC, HEIF, JPEG, PNG, MOV, and MP4** files without re-encoding, compression, or downscaling.
-- Preserves all original embedded EXIF metadata, HDR color spaces, GPS locations, and camera capture profiles.
-- Validated with end-to-end byte-size and SHA-256 cryptographic hashes against verified baselines.
+Browse the library, filter and sort media, and review your selection.
 
-### 🔴 2. True Live Photo Preservation
-- Intelligently detects and pairs Live Photo still images (`.HEIC` / `.JPG`) with their accompanying short video clips (`.MOV`).
-- Exports both components together to ensure your Live Photo memories remain intact.
+| Light mode | Dark mode |
+| --- | --- |
+| ![2. Choose media in light mode](docs/screenshots/gallery-light.png) | ![2. Choose media in dark mode](docs/screenshots/gallery-dark.png) |
 
-### ⚡ 3. High-Performance Virtualized Gallery
-- Modern Windows 11 Fluent interface built in native Rust (`eframe` / `egui`).
-- Smooth 60–144 FPS scrolling effortlessly handling **4,763+ media items** with zero UI freezing or memory bloat.
-- Viewport-aware asynchronous thumbnail loading pipeline with LRU texture recycling.
+### 3. Export
 
-### 🖱️ 4. Drag-to-Select Multi-Selection
-- Intuitive **marquee / rubberband selection box**: drag across any photo grid area to select multiple photos and videos at once.
-- Full modifier key support: hold `Shift` or `Ctrl` while dragging to add to your current selection.
-- Automatic viewport edge scrolling while dragging across large collections.
+Name your export folder, choose how files are organized, and preview the destination.
 
-### 📅 5. Chronological Months Overview
-- Compact left sidebar grouping your media by month with exact item counts and human-readable storage sizes.
-- Filter to a single month or view your entire library with a single click.
+| Light mode | Dark mode |
+| --- | --- |
+| ![3. Export in light mode](docs/screenshots/export-light.png) | ![3. Export in dark mode](docs/screenshots/export-dark.png) |
 
-### 🔍 6. Instant Search, Filters & Sorting
-- Filter instantly by **Photos**, **Videos**, or **Live Photos**.
-- Real-time substring search by filename or folder.
-- Grouping modes: **Month**, **Week**, **Date**, or continuous gallery.
-- Sorting modes: **Newest First**, **Oldest First**, **Largest First**, and **Smallest First**.
+### 4. Results
 
-### 💾 7. Reliable Export Dock
-- Persistent bottom toolbar with one-click Windows destination folder picker.
-- Live transfer progress displaying item counts, transferred megabytes, and real-time throughput (MB/s).
-- Graceful cancellation support without locking the device or application.
+Review the export summary and transfer details. This screenshot shows simulated demo results.
 
-### 💻 8. Scriptable Headless CLI
-- Includes standalone `itool.exe` for headless terminal use, scheduled backup jobs, and automated workflows.
+| Light mode | Dark mode |
+| --- | --- |
+| ![4. Results in light mode](docs/screenshots/results-light.png) | ![4. Results in dark mode](docs/screenshots/results-dark.png) |
 
----
+## Guided workflow
 
-## Daily editor workflow
+1. **Connect:** connect one iPhone using a data-capable cable, unlock it, confirm Trust, then choose **Scan iPhone**. Setup help is available on this screen.
+2. **Choose media:** use the grid or details list, search, media-type/month filters, available Albums/Favorites, and Sort/View options. Click, Shift-click, drag or select a group. Select/invert shown items and review the selection basket. Selection survives filters. Ctrl+A selects shown items; Escape clears selection outside text inputs.
+3. **Export:** choose an existing save location, edit the new folder name, and preview its contents. Choose flat, day, month, media-type or DCIM source folders. Existing output folders and duplicate relative names block export. Change the name or choose Source folders to resolve conflicts. Gallery grouping and output layout are independent.
+4. **Results:** see progress, cancel, inspect copied/skipped/converted resource counts and optional-step notes, and open the output folder. Cancellation preserves completed originals.
 
-Use the **Dark mode / Light mode** button at the top right to switch the entire workspace. The preference is saved locally in `%APPDATA%\ITool\preferences.json` and reused on launch. Native Windows folder-picker appearance follows Windows settings.
+Neutral light/dark palettes use a blue accent. Appearance is saved in `%APPDATA%\ITool\preferences.json`. The desktop executable suppresses its console window; the separate CLI retains its console.
 
-1. **Connect & scan:** connect one iPhone by USB, unlock it, confirm Trust, and click **Scan iPhone**. A scanned library is a snapshot; reconnect the phone before copying.
-2. **Choose media:** use filename/date/folder search, Photos / Videos / Live filters, the month sidebar, or **Latest day**. Latest day means the newest device file date in the scan, not necessarily today.
-3. **Set your view:** choose **Grid** for thumbnails or **Details** for names, dates, sizes, types, and resource counts. Adjust thumbnail size. Sort by newest, oldest, largest, smallest, name A–Z, or name Z–A. Group by month, week, day, media type, source folder, or no grouping. The sort applies inside each group; groups appear in first-encounter order. Source folders are DCIM directories, not Photos albums.
-4. **Select:** click individual items, Shift-click a range, drag across the grid, select a group, or use **Select shown**, **Invert shown**, and **Clear selection**. **Selected only** reviews your basket. Selection survives filters. Ctrl+A selects shown media; Escape clears selection when a text field or review window is not focused. Select shown and Invert shown affect the current filtered view only.
-5. **Review export:** choose an existing parent folder and click **Review … items**. Review lists every original resource, including both Live Photo components and any selections hidden by filters. Choose one folder, folders by day/month, separate media-type folders, or source folders. Duplicate output names block transfer; source-folder organization resolves matching names in different DCIM folders.
-6. **Transfer & verify:** click **Start transfer**. ITool creates the exact new folder shown in review, keeps original filenames, and copies the selected resources in group/sort order. Cancel preserves completed files. Open the resulting folder after completion, or use **Open incomplete export** after an interrupted transfer.
+## Only copy new files
 
-**Dates:** browsing and date-based export folders use device filesystem creation time. They are not an EXIF capture-date guarantee. Embedded metadata remains unchanged.
+Enable **Only copy new files** on Export. Local history lives in `.itool-history` inside the save location. Reuse that parent for future batches, with a new batch folder name each time.
 
-**Transfer evidence:** `completed.json` records successfully copied files after each file, with source paths, relative output paths, byte counts, and SHA-256 hashes. A successful batch also writes `transfer.json` with totals and verification details. Verification compares the received stream hash with a local destination reread and checks source size/mtime stability; it is not an independent source digest. These reports contain private media paths and stay in your local export folder. They do not implement automatic resume or incremental sync.
+History is separated by a SHA-256 hash of the device identifier. A skip requires matching device/source path, size, filesystem creation/modification dates, and a saved original that still matches its stored SHA-256. Missing, modified or unknown saved copies are copied again. If one selected Live Photo resource needs copying, both are copied into the new batch. Requested conversion/timestamp options also affect skip eligibility.
 
-The export-folder choices are informed by [3uTools' documented Professional Export options](https://www.3u.com/3u). ITool keeps original resources together and never converts or writes media to the phone.
+This is metadata-based incremental detection with local-copy verification, not a new source digest. Source content changed without changing those metadata values cannot be detected. Moving/deleting history loses skip knowledge; older exports without history are copied again. This does not resume partial files or synchronize deletions. History contains private paths; keep it private.
 
-For a device-free UI preview, run `itool-desktop.exe --demo`. The sample media is synthetic, and device scanning and transfer are disabled. Add `--demo-list`, `--demo-review`, or `--demo-dark` to preview those surfaces and the dark palette. UI appearance and automated checks do not establish real-device transfer behavior.
+## Additional JPEG and MP4 copies
 
----
+Under **More options**, request JPEG copies of HEIC/HEIF and/or H.264/AAC MP4 copies of SDR MOV/M4V. Originals remain intact. Copies use names such as `IMG_1023.HEIC.jpg` and `IMG_1023.MOV.mp4` to distinguish them from originals.
 
-## Why ITool is Better than 3uTools & Proprietary Chinese Apps
+Local **FFmpeg** is required; MP4 conversion also requires **ffprobe**. The app looks in a `tools` folder beside the executable, then on PATH. Settings shows availability. ITool does not download these tools or redistribute them in its portable package. See [FFmpeg downloads](https://ffmpeg.org/download.html).
 
-Popular third-party iOS management software (such as **3uTools**, **iTools**, **Tenorshare iCareFone**, etc.) has long dominated Windows iOS utilities, but they come with severe privacy, safety, and performance trade-offs.
+Codec support depends on the installed build. Decode/encode failures become notes while preserving originals. HDR videos and videos with missing color-transfer metadata are skipped for conversion. Compatible copies can change compression, color and metadata; they are not archival substitutes. Converted pairs are not guaranteed to reimport as Apple Live Photos.
 
-Here is how ITool compares:
+## Capture timestamps
 
-| Feature / Criteria | 3uTools & Chinese iOS Utilities | ITool (iPhone Original Media Exporter) |
-| :--- | :--- | :--- |
-| **Privacy & Telemetry** | ❌ **High risk.** Sends device identifiers (UDID, IMEI, serial), battery health, and telemetry to overseas servers. | ✅ **100% Offline.** Zero network requests, zero telemetry, zero analytics, zero data harvesting. |
-| **Open Source** | ❌ **Closed-source proprietary binary.** Impossible to audit what code executes when your unlocked device is connected. | ✅ **100% Open Source Rust.** Full auditability, transparent codebase, and clean dependencies. |
-| **System Footprint & Bloat** | ❌ **Heavy bloatware (200MB+ installer).** Installs background autorun daemons, adware popups, and virtual network adapters. | ✅ **Ultra-lightweight (~11 MB single binary).** Portable, zero installation required, no registry entries, no background daemons. |
-| **Device Safety** | ⚠️ **Invasive write access.** Uses proprietary jailbreak/flashing daemons with write permissions on the device. | ✅ **Strictly Read-Only (`LFS_O_RDONLY`).** Connects via Apple's standard MobileDevice service. Impossible to delete or corrupt phone media. |
-| **Media Preservation** | ⚠️ Often silently converts HEIC to compressed JPEG or strips paired Live Photo video tracks. | ✅ **Bit-for-Bit Original.** Never compresses or converts; pairs Live Photos automatically; verifies with SHA-256. |
-| **UI Performance** | ❌ Laggy, web-view/Chromium or bloated MFC interfaces that stutter with thousands of files. | ✅ **Native GPU-accelerated Rust (`egui`).** Butter-smooth 60+ FPS virtualization across 4,700+ media files using ~60MB RAM. |
+Enable **Use embedded capture dates for saved file timestamps**. ITool reads EXIF DateTimeOriginal/OffsetTimeOriginal, including supported HEIF images, and can use ffprobe for video/container creation metadata. On Windows it sets destination creation/modification times without changing file contents.
 
----
+A date without an offset uses the PC timezone and produces a note. Missing, ambiguous or unreadable dates leave destination timestamps unchanged and are reported. Video container creation time is not necessarily camera capture time. Gallery dates and day/month folders still use device filesystem dates, independently of this option.
 
-## Feature Requests — If You Request It, It Will Be Added! 🚀
+## Albums and Favorites
 
-ITool is being actively developed to become the fastest, most reliable, and most trustworthy open-source iPhone companion for Windows users.
+The scan attempts a bounded read-only copy of `/PhotoData/Photos.sqlite` and its WAL when exposed by iOS. SQLite runs only on a private temporary local snapshot, discarded afterward. The reader supports `ZASSET`/`ZGENERICASSET`, Favorite flags and discoverable album join tables. Snapshots whose source metadata changes during copying or which fail consistency checks are rejected.
 
-**Have a feature in mind? Need a specific workflow?**
-👉 **[Open a GitHub Issue](https://github.com/Marshmellow31/ITool/issues)** or reach out directly — **if a feature is requested, it will be prioritized and built!**
+iOS can deny access and its private schema can change. Unsupported filters are disabled and availability is explained. Only metadata mapped to accessible DCIM originals is shown. DCIM folders are not Photos albums; cloud-only originals are not fetched. No jailbreak, database writes to the device or authentication bypass is used. Physical-phone access and schema compatibility remain unverified.
 
-### Ideas on the Roadmap:
-- [x] **Organized Exports**: Choose day, month, media-type, source-folder, or flat output in export review; see the date-source limitation above.
-- [ ] **Incremental Sync**: One-click "Export New Photos Only" to skip media already backed up previously.
-- [ ] **Selective Format Conversion**: Optional toggle to export converted JPEG/MP4 copies alongside the original HEIC/MOV.
-- [ ] **Capture Timestamp Preservation**: Explicitly stamp NTFS file creation and modification timestamps from embedded EXIF metadata.
-- [ ] **Album & Favorites Filtering**: Direct filtering by iOS Favorites and custom user albums.
+## Folder and integrity behavior
 
----
+- Each batch creates the exact new folder shown on Export. Original names and grouped Live Photo resources are retained.
+- Use an **NTFS** save location. Final publication uses hard links to avoid overwriting. exFAT/FAT destinations are not supported by this implementation.
+- `completed.json` checkpoints originals copied in this batch. Unfinished files retain `.partial` and are not treated as complete.
+- `transfer.json` records original evidence, skipped paths, compatible copies, options and notes. An all-skipped batch may contain reports without new originals.
+- Original verification compares received-stream SHA-256 with a destination reread and checks source size/mtime. It is not an independent device-side digest.
+- A different connected iPhone from the scanned device blocks desktop export until rescanning.
+- Device access initiated by this app is read-only. Reports/history contain private paths and should remain private.
+- The transfer default is **4 MiB**. USB 3 performance and improvement over smaller buffers require hardware benchmarks; no 10 Gbit/s throughput claim is made.
 
-## Download & Getting Started
+## Requirements
 
-### Requirements
-- **Operating System**: Windows 10 or Windows 11 (64-bit).
-- **Apple Mobile Device Support**: Provided automatically by the official **Apple Devices** app (from the Microsoft Store) or **iTunes for Windows**.
-- **USB Connection**: Connect your iPhone with a standard Lightning or USB-C cable, unlock the screen, and tap **"Trust This Computer"** when prompted.
+Windows 10/11 x64, Apple Mobile Device Support through Apple Devices or iTunes, one trusted USB-connected iPhone and an NTFS save location. Originals must be available through the device media service; thumbnails do not prove original availability. Optional FFmpeg/ffprobe enables compatible copies and video timestamps. EXIF parsing is built in.
 
-### Installation
-1. Go to the latest **[GitHub Releases](https://github.com/Marshmellow31/ITool/releases)**.
-2. Download `ITool-v0.2.0-windows-x64.zip` (or `itool-desktop.exe` directly).
-3. Unzip anywhere and double-click `itool-desktop.exe` to run. No installation or admin privileges needed.
+Start `itool-desktop.exe` for the guided interface or `itool.exe` for CLI workflows.
 
----
-
-## Building from Source
-
-If you prefer building directly from source:
+## CLI examples
 
 ```powershell
-# Clone the repository
-git clone https://github.com/Marshmellow31/ITool.git
-cd ITool
+.\itool.exe devices
+.\itool.exe list /DCIM
+.\itool.exe find IMG_3119.HEIC IMG_3119.MOV
+.\itool.exe library
+.\itool.exe library --favorites
+.\itool.exe library --album "Travel"
 
-# Run tests
-cargo test --all-targets --features desktop
+# Destination is a NEW directory inside an existing parent
+.\itool.exe export --dest D:\Photos\Batch-1 /DCIM/123APPLE/IMG_3119.HEIC /DCIM/123APPLE/IMG_3119.MOV
+.\itool.exe export --dest D:\Photos\Batch-2 --new-only --capture-timestamps --jpeg-copies --mp4-copies /DCIM/123APPLE/IMG_3119.HEIC /DCIM/123APPLE/IMG_3119.MOV
 
-# Build optimized release binaries
-cargo build --release --features desktop --bin itool-desktop
-cargo build --release --bin itool
-
-# Launch the desktop UI
-.\target\release\itool-desktop.exe
+# Override transfer chunks: 64–8192 KiB, default 4096
+.\itool.exe export --dest D:\Photos\Batch-3 --chunk-kib 4096 /DCIM/123APPLE/IMG_3119.MOV
+.\itool.exe verify --baseline .\manifest.json --dir D:\Photos\Batch-1
 ```
 
----
+Include both still and clip paths for Live Photos through the exact-path CLI. Desktop selection expands both automatically. The existing baseline verifier expects flat original files.
 
-## CLI Usage
+## Build and sample screens
 
-For power users and automated backup scripts, `itool.exe` provides a clean command-line interface:
+Rust edition 2024. Build optimized Windows binaries:
 
 ```powershell
-# List connected Apple devices
-.\target\release\itool.exe devices
-
-# List DCIM directory contents
-.\target\release\itool.exe list /DCIM
-
-# Find specific photos or videos across DCIM folders
-.\target\release\itool.exe find IMG_3119.HEIC IMG_3119.MOV
-
-# Export media with bit-for-bit verification
-.\target\release\itool.exe export --dest D:\Backups\iPhone2026 --chunk-kib 1024 /DCIM/123APPLE/IMG_3119.HEIC /DCIM/123APPLE/IMG_3119.MOV
-
-# Verify exported files against a baseline manifest
-.\target\release\itool.exe verify --baseline .\manifest.json --dir D:\Backups\iPhone2026
+cargo build --release --features desktop --bins
 ```
 
----
+Device-free sample mode simulates the guided flow without connecting to an iPhone or copying files. Opening synthetic output paths is disabled:
 
-## License
+```powershell
+.\target\release\itool-desktop.exe --demo
+.\target\release\itool-desktop.exe --demo --demo-connect
+.\target\release\itool-desktop.exe --demo --demo-review
+.\target\release\itool-desktop.exe --demo --demo-results
+# Add --demo-light or --demo-dark to choose the theme, or --demo-list for details view.
+```
 
-This project is licensed under the [MIT License](LICENSE).
-Apple, iPhone, Lightning, and Live Photos are trademarks of Apple Inc., registered in the U.S. and other countries. ITool is an independent open-source project.
+Tests, when authorized, run separately with `cargo test --all-targets --features desktop`. Builds and sample screens do not establish physical-device behavior.
+
+## Roadmap status
+
+- [x] Organized exports and editable named-batch folders (implemented in source).
+- [x] Incremental exports with checked local history (implemented; device validation pending).
+- [x] Optional compatible copies (implemented; FFmpeg/codecs required; media validation pending).
+- [x] Capture timestamps (implemented with fallbacks; media/NTFS validation pending).
+- [x] Conditional Albums/Favorites (implemented; physical-phone access/schema support unverified).
+- [ ] Device, interruption and long-batch validation of this development build.
+- [ ] Measured USB 3 benchmarks.
+- [ ] Reliable cloud-only original retrieval and broader Photos-schema coverage.
+- [ ] Byte-offset resume for partial files.
+- [ ] Verified HDR-to-SDR tone mapping.
+
+Historical evidence: an earlier CLI copied seven resources totaling 185,252,866 bytes in 11.178 seconds, matching a 3uTools sample byte-for-byte. The 3uTools batch was not timed. This does not validate the new UI or roadmap features.
+
+## References and license
+
+EXIF parsing uses [kamadak-exif](https://docs.rs/kamadak-exif/latest/exif/). Photos schema discovery is informed by [iLEAPP's Photos metadata parser](https://github.com/abrignoni/iLEAPP/blob/main/scripts/artifacts/photosMetadata.py); this does not establish AFC database accessibility on a particular iPhone.
+
+MIT licensed. Apple and iPhone are trademarks of Apple Inc. ITool is independent.

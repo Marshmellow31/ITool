@@ -15,6 +15,11 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+const DEFAULT_TRANSFER_CHUNK_KIB: u32 = 4096;
+
+pub mod library;
+pub mod workflow;
+
 #[derive(Parser)]
 #[command(
     version,
@@ -39,12 +44,27 @@ enum Command {
         #[arg(required = true)]
         names: Vec<String>,
     },
+    /// Scan accessible media, optionally filtering by an iOS album or Favorites.
+    Library {
+        #[arg(long)]
+        album: Option<String>,
+        #[arg(long)]
+        favorites: bool,
+    },
     /// Export exact device paths into a NEW destination directory.
     Export {
         #[arg(long)]
         dest: PathBuf,
-        #[arg(long, default_value_t = 1024, value_parser = clap::value_parser!(u32).range(64..=8192))]
+        #[arg(long, default_value_t = DEFAULT_TRANSFER_CHUNK_KIB, value_parser = clap::value_parser!(u32).range(64..=8192))]
         chunk_kib: u32,
+        #[arg(long)]
+        new_only: bool,
+        #[arg(long)]
+        capture_timestamps: bool,
+        #[arg(long)]
+        jpeg_copies: bool,
+        #[arg(long)]
+        mp4_copies: bool,
         #[arg(required = true)]
         paths: Vec<String>,
     },
@@ -57,7 +77,7 @@ enum Command {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CopiedFile {
     source_path: String,
     filename: String,
@@ -380,6 +400,13 @@ fn is_image(name: &str) -> bool {
 
 pub async fn scan_media(mut status: impl FnMut(String)) -> Result<Vec<MediaItem>> {
     let mut client = afc().await?;
+    scan_with_client(&mut client, &mut status).await
+}
+
+async fn scan_with_client(
+    client: &mut AfcClient,
+    mut status: impl FnMut(String),
+) -> Result<Vec<MediaItem>> {
     let mut folders =
         tokio::time::timeout(std::time::Duration::from_secs(30), client.list_dir("/DCIM"))
             .await
@@ -633,15 +660,21 @@ pub async fn export_planned(
         let output = dest.join(&entry.folder);
         tokio::fs::create_dir_all(&output).await?;
         let file_num = idx + 1;
-        let mut copied =
-            copy_one_observed(&mut client, &path, &output, 1024 * 1024, cancel, &mut |n| {
+        let mut copied = copy_one_observed(
+            &mut client,
+            &path,
+            &output,
+            DEFAULT_TRANSFER_CHUNK_KIB as usize * 1024,
+            cancel,
+            &mut |n| {
                 progress(
                     completed + n,
                     total,
                     format!("{name} ({file_num}/{total_files})"),
                 )
-            })
-            .await?;
+            },
+        )
+        .await?;
         completed += copied.bytes;
         if !entry.folder.is_empty() {
             copied.filename = format!("{}/{}", entry.folder, copied.filename);
@@ -659,7 +692,7 @@ pub async fn export_planned(
     );
     let report = TransferReport {
         transport: "Apple USB service + pure Rust AFC",
-        chunk_kib: 1024,
+        chunk_kib: DEFAULT_TRANSFER_CHUNK_KIB,
         files,
         total_bytes: completed,
         transfer_seconds: elapsed,
@@ -721,45 +754,63 @@ async fn run(args: Args) -> Result<()> {
                 ensure!(found.contains(&name), "Not found in exposed DCIM: {name}");
             }
         }
+        Command::Library { album, favorites } => {
+            let snapshot = library::scan(|s| eprintln!("{s}")).await?;
+            ensure!(
+                !favorites || snapshot.favorites_available,
+                "Favorites are unavailable on this device"
+            );
+            ensure!(
+                album.is_none() || snapshot.albums_available,
+                "Albums are unavailable on this device"
+            );
+            let items: Vec<_> = snapshot
+                .items
+                .iter()
+                .filter(|i| {
+                    let metadata = snapshot.assets.get(&i.path);
+                    (!favorites || metadata.is_some_and(|m| m.favorite == Some(true)))
+                        && album
+                            .as_ref()
+                            .is_none_or(|a| metadata.is_some_and(|m| m.albums.contains(a)))
+                })
+                .collect();
+            eprintln!("{}", snapshot.metadata_status);
+            println!("{}", serde_json::to_string_pretty(&items)?);
+        }
         Command::Export {
             dest,
             chunk_kib,
             paths,
+            new_only,
+            capture_timestamps,
+            jpeg_copies,
+            mp4_copies,
         } => {
-            let mut seen = std::collections::HashSet::new();
-            for path in &paths {
-                let name = local_name(path)?.to_ascii_lowercase();
-                ensure!(
-                    seen.insert(name.clone()) && seen.insert(format!("{name}.partial")),
-                    "Duplicate output filename in selection"
-                );
-                ensure!(name != "completed.json.tmp", "Reserved checkpoint filename");
-            }
-            // A new directory per run prevents accidental overwrites and mixed benchmark results.
-            tokio::fs::create_dir(&dest)
-                .await
-                .context("Destination must be a NEW directory inside an existing parent")?;
-            let mut client = afc().await?;
-            let start = Instant::now();
-            let mut files = Vec::new();
-            for remote in paths {
-                files.push(copy_one(&mut client, &remote, &dest, chunk_kib as usize * 1024).await?);
-                checkpoint(&dest, &files).await?;
-            }
-            let elapsed = start.elapsed().as_secs_f64();
-            let bytes = files.iter().map(|f| f.bytes).sum();
-            let report = TransferReport {
-                transport: "Apple USB service + pure Rust AFC",
+            let options = workflow::ExportOptions {
                 chunk_kib,
-                files,
-                total_bytes: bytes,
-                transfer_seconds: elapsed,
-                mib_per_second: bytes as f64 / 1048576.0 / elapsed,
-                verification: "stream SHA-256 matches destination reread; source size and mtime stable; no independent source digest",
+                new_only,
+                capture_timestamps,
+                jpeg_copies,
+                mp4_copies,
+                expected_device: None,
             };
-            let json = serde_json::to_string_pretty(&report)?;
-            tokio::fs::write(dest.join("transfer.json"), &json).await?;
-            println!("{json}");
+            let entries = paths
+                .into_iter()
+                .map(|source| ExportEntry {
+                    source,
+                    folder: String::new(),
+                })
+                .collect();
+            let outcome = workflow::export(
+                &dest,
+                entries,
+                options,
+                &std::sync::atomic::AtomicBool::new(false),
+                |done, total, name| eprintln!("{done}/{total} · {name}"),
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&outcome)?);
         }
         Command::Verify { baseline, dir } => {
             let data: serde_json::Value =
